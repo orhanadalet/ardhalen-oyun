@@ -1,0 +1,135 @@
+{
+ "surum": "3.0",
+ "tarih": "2026-11-01",
+ "notlar": [
+  "Büyüler sinema gibi: akan alevli çekirdek, arkasında ışık izi, çarpmada parlama, havayı büken",
+  "Her sınıfa 8 büyü ve 50. seviyede doruk büyüsü; 30. ve 50. seviye büyüleri sınavla gelir.",
+  "Yetenek Dalı (P): büyüler, yol seçimleri ve druid yemini tek pencerede. Yetenek puanları",
+  "Avcı yoldaşını kendisi evcilleştirir; bağ birlikte savaştıkça güçlenir, zayıflarsa yoldaş gider.",
+  "Dalış: derin suda Ctrl ile dalınır; nefes biterse boğulursun. Ölümsüz ve samur biçimi boğulmaz.",
+  "Deniz limanları açık kıyılarda; gemi yanaşır, iskele tahtasından kendin binersin. Gerçek gemiler.",
+  "Haritalar arası kesintisiz geçiş: boğazdan yürüyerek geçilir, kara ekran yok.",
+  "Her büyük haritanın kendine özgü yeryüzü: Ayaz Dağı, Kuzgun Tepeleri, Ötüken Yışı, kanyonlar, basamaklar.",
+  "Harita penceresinde kenara gelince komşu bölgenin adı, seviyesi ve İttifakı; tıklayınca yol.",
+  "Kahramanlar elbisesiz gövdede, eşyaya göre giyinir; dövme, yara izi, saç ve sakal; kostüm setleri.",
+  "Savaş dışında silah sırtta ya da belde; omuzluk ve miğfer gövdeye oturur; iki silahlı Savaşçı.",
+  "Sol tık yalnız seçer, sağ tık saldırır. Ek eylem çubuğunun tuşları atanabilir.",
+  "Kayaların içine girilmez, üstlerine çıkılır; eşyalar iç içe geçmez; ekran sallanmaz.",
+  "Yeni görüntü tonu: yakın net, uzakta sıcak pus."
+ ],
+ "haberler": [
+  {
+   "tarih": "1 Kasım 2026",
+   "baslik": "Ardhalen 3.0",
+   "metin": "Sinema gibi büyüler, açık deniz limanları ve kendin bindiğin gemiler, haritalar arası kesintisiz geçiş, dalış, evcilleştirilen yoldaş ve bağ, eşyaya göre giyinen kahramanlar, her sınıfa yeni büyüler ve doruk sınavları. Başlatıcı GÜNCELLE der, yalnız değişen dosyalar iner."
+  },
+  {
+   "tarih": "28 Ekim 2026",
+   "baslik": "Ardhalen Başlatıcı yayında",
+   "metin": "Oyunu artık başlatıcıyla kuruyorsun; her yeni sürümde başlatıcı GÜNCELLE der ve yalnız değişen dosyaları indirir."
+  }
+ ],
+ "sunucu": "",
+ "baslatici": {
+  "surum": "1.0",
+  "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/latest/download/ArdhalenBaslatici.exe"
+ },
+ "dosyalar": [
+  {
+   "yol": "Ardhalen.exe",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.0/Ardhalen.exe",
+   "sha256": "66b26ad96df7458ea917b632a73ac7c88bb058db24dbd11a457fd50435ab7b13",
+   "boyut": 84214784
+  },
+  {
+   "yol": "Ardhalen.pck",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.0/Ardhalen.pck",
+   "sha256": "39dce68d957af3bf25aacddc36926e18f7357f14a412391f457f473eecce3cfe",
+   "boyut": 988267536
+  },
+  {
+   "yol": "DENEME_LISTESI_2.8.txt",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.0/DENEME_LISTESI_2.8.txt",
+   "sha256": "e4c2a24c539f519a477f1a2d2cc6ea0af690c0d3f1935ff07e233c11298b3c37",
+   "boyut": 5328
+  },
+  {
+   "yol": "GIZLILIK_POLITIKASI.md",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.0/GIZLILIK_POLITIKASI.md",
+   "sha256": "b25ed4cd9d0e94446b4ca0a66316463777b779058bb55bd1b19602d072f71973",
+   "boyut": 2169
+  },
+  {
+   "yol": "KULLANIM_SOZLESMESI.txt",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.0/KULLANIM_SOZLESMESI.txt",
+   "sha256": "cd14a29ce70b08f42fcfb2722e57d502baded806c1ce9c3c80937663ff6000fe",
+   "boyut": 2615
+  },
+  {
+   "yol": "OKU BENI.txt",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.0/OKU_BENI.txt",
+   "sha256": "58a50038addb4e92dbf0e59dd2d46762414845cc3bd5d6cd5fea5e8b4a137419",
+   "boyut": 8662
+  },
+  {
+   "yol": "Sorun Giderme.bat",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.0/Sorun_Giderme.bat",
+   "sha256": "4be3d5ef0c1745958eb5a678348340badae9ccba7b5ce7a432b0753036ee7cfe",
+   "boyut": 355
+  },
+  {
+   "yol": "Sunucuya Baglan.bat",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.0/Sunucuya_Baglan.bat",
+   "sha256": "29b7e02840798f4c0da46cd02a865a7f914d55ca1395b1fdc3701d0e3aae564e",
+   "boyut": 106
+  },
+  {
+   "yol": "TESTCI_NOTU.txt",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.0/TESTCI_NOTU.txt",
+   "sha256": "b7bf48b5d9fd6dc3eea9e05c1f4ea451bad09d0cd4ac2b5ad06f012f452b8bfa",
+   "boyut": 3411
+  },
+  {
+   "yol": "Uyumlu Mod.bat",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.0/Uyumlu_Mod.bat",
+   "sha256": "9bf8c671c0e7ff5e9d36e70820d6e3740ca4ad7eb4ce0c9297f1bb50808fa933",
+   "boyut": 78
+  },
+  {
+   "yol": "icon.ico",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.0/icon.ico",
+   "sha256": "44dd5ac568784fd8f5787fb5abd8378640bea30db48d37fe8bb145a98eb3e14b",
+   "boyut": 15318
+  },
+  {
+   "yol": "licenses/Godot_MIT.txt",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.0/licenses__Godot_MIT.txt",
+   "sha256": "e9a96373ee89b7538126a8de83e8e0d476ef0d0a9f83d676ec1daa5b967c6991",
+   "boyut": 1319
+  },
+  {
+   "yol": "licenses/MakeHuman_CC0.txt",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.0/licenses__MakeHuman_CC0.txt",
+   "sha256": "a629bada50e3baa3ac50b648ebfc4f1075c0517654dee5b2fbc71088fa230079",
+   "boyut": 509
+  },
+  {
+   "yol": "licenses/Mixamo_ve_PolyHaven.txt",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.0/licenses__Mixamo_ve_PolyHaven.txt",
+   "sha256": "d72c82ea4ecc1bfbabd66414ecd5b003621fc90f2a880952f1601640f2cf95a8",
+   "boyut": 1010
+  },
+  {
+   "yol": "licenses/Varliklar.txt",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.0/licenses__Varliklar.txt",
+   "sha256": "a75ee01e58353e0db264c181514d5eb9ffbe5c7d368517c8b17d64524aeaac5c",
+   "boyut": 6869
+  },
+  {
+   "yol": "sunucuya_baglan.ps1",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.0/sunucuya_baglan.ps1",
+   "sha256": "3610bab742ea6186504a295be813833bdae1247b4c2d79450a04299c2f7dad7b",
+   "boyut": 785
+  }
+ ]
+}
