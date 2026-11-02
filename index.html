@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ardhalen – Kayıp Krallığın Yankıları</title>
+<meta name="description" content="Üçe bölünmüş kayıp bir krallıkta keşif, kervan, zindan ve destan dolu bir RPG. Ardhalen Başlatıcı ile kur, güncellemeleri otomatik al.">
+<meta property="og:title" content="Ardhalen – Kayıp Krallığın Yankıları">
+<meta property="og:description" content="Üçe bölünmüş kayıp bir krallıkta keşif, kervan, zindan ve destan dolu bir RPG.">
+<meta property="og:image" content="varlik/arka.jpg">
+<link rel="icon" href="varlik/favicon.png">
+<style>
+@font-face { font-family: "Pagella"; src: url("varlik/texgyrepagella-regular.otf"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Pagella"; src: url("varlik/texgyrepagella-bold.otf"); font-weight: 700; font-display: swap; }
+:root {
+  --zemin: #120b08; --zemin2: #1c120d; --kart: #21150f; --kenar: #5a4224;
+  --altin: #ebc26a; --altin2: #c8963e; --yazi: #e6dccd; --soluk: #a99a86;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--zemin); color: var(--yazi); font-family: "Pagella", Georgia, serif; font-size: 18px; line-height: 1.6; }
+a { color: var(--altin); }
+.kap { max-width: 1080px; margin: 0 auto; padding: 0 16px; }
+header.on { position: relative; min-height: 78vh; display: flex; align-items: flex-end;
+  background: linear-gradient(90deg, rgba(14,8,6,.88) 0%, rgba(14,8,6,.35) 60%, rgba(14,8,6,.1) 100%), url("varlik/arka.jpg") center/cover; }
+header.on::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 120px; background: linear-gradient(transparent, var(--zemin)); }
+.on .kap { position: relative; z-index: 1; padding-bottom: 72px; width: 100%; }
+.ust { display: flex; align-items: center; gap: 12px; position: absolute; top: 20px; left: 16px; right: 16px; z-index: 2; max-width: 1080px; margin: 0 auto; }
+.ust img { width: 42px; height: 42px; border-radius: 8px; }
+.ust span { font-weight: 700; letter-spacing: .12em; color: var(--altin); }
+h1 { font-size: clamp(48px, 9vw, 96px); line-height: 1; margin: 0 0 6px; color: var(--altin); letter-spacing: .04em; text-shadow: 0 4px 18px #000; }
+.alt { font-size: clamp(20px, 3vw, 28px); color: var(--yazi); margin: 0 0 28px; text-shadow: 0 2px 10px #000; }
+.dugmeler { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.indir { display: inline-block; background: linear-gradient(#f0cd7c, #c8963e); color: #1c0f05; font-weight: 700; font-size: 22px;
+  padding: 16px 30px; border-radius: 6px; text-decoration: none; box-shadow: 0 6px 24px rgba(0,0,0,.5); border: 1px solid #ffe3a3; }
+.indir:hover { filter: brightness(1.08); }
+.ikincil { color: var(--yazi); font-size: 16px; }
+.not { color: var(--soluk); font-size: 15px; margin-top: 10px; }
+section { padding: 56px 0; }
+h2 { color: var(--altin); font-size: 34px; margin: 0 0 18px; letter-spacing: .03em; }
+.anlati { font-size: 21px; max-width: 760px; color: var(--yazi); }
+.anlati p:first-child::first-letter { font-size: 3.2em; float: left; line-height: .9; margin: 4px 8px 0 0; color: var(--altin); }
+.kartlar { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }
+.kart { background: var(--kart); border: 1px solid var(--kenar); border-radius: 8px; overflow: hidden; }
+.kart img { width: 100%; aspect-ratio: 800/335; object-fit: cover; display: block; }
+.kart div { padding: 14px 18px 18px; }
+.kart h3 { margin: 0 0 4px; color: var(--altin); font-size: 22px; }
+.kart p { margin: 0; color: var(--soluk); font-size: 16px; }
+.ozellik { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px 28px; }
+.ozellik div { border-left: 2px solid var(--altin2); padding-left: 14px; }
+.ozellik b { color: var(--altin); display: block; font-size: 19px; }
+.ozellik span { color: var(--soluk); font-size: 16px; }
+.haber { background: var(--zemin2); border: 1px solid var(--kenar); border-radius: 8px; padding: 16px 20px; margin-bottom: 12px; }
+.haber b { color: var(--altin); } .haber small { color: var(--soluk); margin-left: 8px; }
+table { border-collapse: collapse; width: 100%; max-width: 720px; font-size: 16px; }
+td, th { border-bottom: 1px solid var(--kenar); padding: 8px 10px; text-align: left; vertical-align: top; }
+th { color: var(--altin); font-weight: 700; }
+footer { border-top: 1px solid var(--kenar); padding: 28px 0 40px; color: var(--soluk); font-size: 15px; }
+@media (max-width: 600px) { body { font-size: 17px; } .indir { width: 100%; text-align: center; } section { padding: 40px 0; } }
+</style>
+</head>
+<body>
+<header class="on">
+  <div class="ust"><img src="varlik/simge.png" alt=""><span>ARDHALEN</span></div>
+  <div class="kap">
+    <h1>ARDHALEN</h1>
+    <p class="alt">Kayıp Krallığın Yankıları</p>
+    <div class="dugmeler">
+      <a class="indir" id="indir" href="https://github.com/orhanadalet/ardhalen-oyun/releases/latest/download/ArdhalenBaslatici.exe">Başlatıcıyı İndir · Windows</a>
+      <span class="ikincil">Android: Google Play'de yakında</span>
+    </div>
+    <p class="not">Başlatıcı oyunu kurar ve yeni sürüm çıktığında tek tıkla günceller. <span id="surum"></span></p>
+  </div>
+</header>
+
+<section>
+  <div class="kap anlati">
+    <p>Bir zamanlar dünya büyüklerindi. Dört halk dört armağanı tek bir antla birleştirdi; büyükler uyudu ve Ardhalen doğdu. Sonra bir baba, ölmek üzere olan kızını kurtarmak için mührü kendi elinden çıkarıp onun parmağına taktı. Ant iki ele birden verildiğini anladı ve yer yarıldı.</p>
+    <p>Dört yüz yıl sonra kıta üçe bölünmüş, aralarına Gözyaşı Denizi dolmuş. Sen o yankının içinde doğdun.</p>
+  </div>
+</section>
+
+<section>
+  <div class="kap">
+    <h2>Üç İttifak</h2>
+    <div class="kartlar">
+      <div class="kart"><img src="varlik/kuzey.jpg" alt="Karlı kuzey suru" loading="lazy"><div><h3>Kuzey Krallıkları</h3><p>Karlı fiyortlar, uzun evler, rün taşları.</p></div></div>
+      <div class="kart"><img src="varlik/bozkir.jpg" alt="Bozkırda oba" loading="lazy"><div><h3>Gök Hanlığı</h3><p>Bozkır, otağlar, kurganlar; rüzgâr ve at.</p></div></div>
+      <div class="kart"><img src="varlik/yesim.jpg" alt="Bambular arasında tapınak" loading="lazy"><div><h3>Yeşim İmparatorluğu</h3><p>Bambu ormanları, tapınaklar, sisli tarlalar.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="kap">
+    <h2>Seni bekleyenler</h2>
+    <div class="ozellik">
+      <div><b>5 ırk, 9 sınıf</b><span>Kılıç ustasından druide; köken seç, hikâyeni ondan başlat.</span></div>
+      <div><b>17 bölge, 21 zindan</b><span>Gece, gündüz, yağmur, kar ve sis; 14 iç mekân.</span></div>
+      <div><b>241 görev</b><span>Kitaplarla bağlı ana hikâye; kurtarma, eşlik, toplama.</span></div>
+      <div><b>Kervan ve haydut</b><span>Malını şehirden şehre taşı ya da yolu kes.</span></div>
+      <div><b>Emekle kazanılan güç</b><span>1.500'den fazla eşya, meslekler, simya; güce para yok.</span></div>
+      <div><b>Savaş</b><span>Akıcı, beceriye dayalı dövüş; düello, Savaş Meydanı, kuşatma.</span></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="kap">
+    <h2>Haberler</h2>
+    <div id="haberler"><p class="not">Yükleniyor…</p></div>
+  </div>
+</section>
+
+<section>
+  <div class="kap">
+    <h2>Sistem gereksinimleri</h2>
+    <table>
+      <tr><th></th><th>En az</th><th>Önerilen</th></tr>
+      <tr><td>Sistem</td><td>Windows 10 64 bit</td><td>Windows 10/11 64 bit</td></tr>
+      <tr><td>Ekran kartı</td><td>OpenGL 3.3 (Uyumlu Mod)</td><td>Vulkan destekli, 2 GB</td></tr>
+      <tr><td>Bellek</td><td>4 GB</td><td>8 GB</td></tr>
+      <tr><td>Disk</td><td>2 GB</td><td>2 GB (SSD)</td></tr>
+    </table>
+    <p class="not">Windows ilk açılışta "bilinmeyen yayıncı" uyarısı gösterebilir: "Ek bilgi → Yine de çalıştır".</p>
+  </div>
+</section>
+
+<footer>
+  <div class="kap">
+    Ardhalen, tek kişilik bağımsız bir geliştiricinin elinden çıkan ve kendi destan kitaplarıyla birlikte büyüyen bir evrendir. Erken erişimdedir.<br>
+    <a href="gizlilik.html">Gizlilik politikası</a> · Bütün hakları saklıdır · © 2026 Orhan Adalet
+  </div>
+</footer>
+
+<script>
+// Haberler ve sürüm: başlatıcının da okuduğu surum.json (tek kaynak)
+fetch("surum.json?t=" + Date.now()).then(function (r) { return r.json(); }).then(function (d) {
+  if (d.surum) document.getElementById("surum").textContent = "Güncel sürüm: " + d.surum + ".";
+  var kutu = document.getElementById("haberler"); kutu.innerHTML = "";
+  var ekle = function (baslik, tarih, metin) {
+    var h = document.createElement("div"); h.className = "haber";
+    var b = document.createElement("b"); b.textContent = baslik; h.appendChild(b);
+    var s = document.createElement("small"); s.textContent = tarih || ""; h.appendChild(s);
+    var p = document.createElement("div"); p.textContent = metin; h.appendChild(p);
+    kutu.appendChild(h);
+  };
+  if (d.notlar && d.notlar.length) ekle("Sürüm " + d.surum + "'de yeni", d.tarih, "• " + d.notlar.join("\n• "));
+  (d.haberler || []).forEach(function (x) { ekle(x.baslik, x.tarih, x.metin); });
+  if (!kutu.children.length) kutu.innerHTML = '<p class="not">Yeni haber yok.</p>';
+}).catch(function () { document.getElementById("haberler").innerHTML = '<p class="not">Haberler şu an alınamadı.</p>'; });
+</script>
+<style>.haber div { white-space: pre-line; color: var(--yazi); margin-top: 4px; font-size: 16px; }</style>
+</body>
+</html>
