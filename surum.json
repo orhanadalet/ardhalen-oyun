@@ -1,0 +1,137 @@
+{
+ "surum": "3.4",
+ "tarih": "2026-11-10",
+ "notlar": [
+  "Ardhalen artık tek başına oynanan bir hikâye oyunu: bağlantı, üyelik ve sunucu gerekmez. Sahte genel sohbet kalktı, maceracılar sözlerini baloncukla söyler.",
+  "Ana hikâye: her İttifakın Kitap I zinciri baştan sona izlenir. Görev izleyicide Ana Hikâye satırı sıradaki görevi ve kimden alınacağını gösterir; ana görev verenin işareti turuncudur. Kızıl Ejder'den sonra Kitap I kapanışı gelir.",
+  "Kitap yoldaşları: Runa, Kayra, Nilüfer ve Urgan kendi görevlerinden sonra yanına katılır, seninle savaşır, seviyenle büyür ve kitaptan sözler söyler.",
+  "İngilizce: Menü > Grafik > Dil · Language. Arayüz, görevler, eşyalar ve konuşmalar çevrildi; özel adlar Türkçe kalır.",
+  "Görsel Tarz ayarı: Gerçekçi ya da Masal. Masal tarzı daha doygun ve yumuşak ışıklıdır.",
+  "Dünyanı Aç: aynı ağdaki bir arkadaşını kendi dünyana çağırabilirsin (deneysel).",
+  "Telefonda akıcılık: uzak nesneler ve gölgeler hafifledi, takılmalar azaldı.",
+  "Ana hikâye seviye beklerken izleyici yan destan bölgesini önerir; dört yurt haritasının görevleri baştan sona biter."
+ ],
+ "haberler": [
+  {
+   "tarih": "10 Kasım 2026",
+   "baslik": "Ardhalen 3.4",
+   "metin": "Ardhalen artık tek başına oynanan bir hikâye oyunu. Her İttifakın Kitap I zinciri baştan sona izlenir; Runa, Kayra, Nilüfer ve Urgan yanına katılır. Oyun İngilizce de oynanır, Görsel Tarz ayarı geldi, telefonda akıcılık arttı. Başlatıcı GÜNCELLE der, yalnız değişen dosyalar iner."
+  },
+  {
+   "tarih": "4 Kasım 2026",
+   "baslik": "Ardhalen 3.3",
+   "metin": "Kitaplarla tam uyum: ejderler ve vezir öldürülmez, yurduna çekilir; Gölge Lordu ve Yüzüksüz Kral sonrası kasabalarda kitap sonrası durum; Buzkıyı, oba ve Kuzgunkale'de yeni kişiler, oyunun ilk çocuğu Birkir; kaptanlar kitaptaki adlarıyla; ölümsüzlere Kemik Düzlüğü'nde kendi taşı. Başlatıcı GÜNCELLE der."
+  },
+  {
+   "tarih": "4 Kasım 2026",
+   "baslik": "Ardhalen 3.2",
+   "metin": "Açılış sineması yeniden: Küllerin Altında Bir Ses. Patron sahneleri ve ağır çekim, yeni müzikler, her sınıfa büyü simgeleri, İttifakına göre selam veren köylüler, başkent meydanları, haydut pususu ve korsan baskını, gizli mağaralar; savaştaki takılmalar kalktı. Başlatıcı GÜNCELLE der, yalnız değişen dosyalar iner."
+  },
+  {
+   "tarih": "2 Kasım 2026",
+   "baslik": "Ardhalen 3.1",
+   "metin": "Oyun kahraman seçimiyle açılıyor, alan büyüleri sinema gibi, ek yetenek çubuğu hazır, gerçekçi at ve binekçide iniş, süresiz Tulpar, nadir ganimet, gemiye her an biniş. Başlatıcı GÜNCELLE der, yalnız değişen dosyalar iner."
+  },
+  {
+   "tarih": "1 Kasım 2026",
+   "baslik": "Ardhalen 3.0",
+   "metin": "Sinema gibi büyüler, açık deniz limanları ve kendin bindiğin gemiler, haritalar arası kesintisiz geçiş, dalış, evcilleştirilen yoldaş ve bağ, eşyaya göre giyinen kahramanlar, her sınıfa yeni büyüler ve doruk sınavları. Başlatıcı GÜNCELLE der, yalnız değişen dosyalar iner."
+  },
+  {
+   "tarih": "28 Ekim 2026",
+   "baslik": "Ardhalen Başlatıcı yayında",
+   "metin": "Oyunu artık başlatıcıyla kuruyorsun; her yeni sürümde başlatıcı GÜNCELLE der ve yalnız değişen dosyaları indirir."
+  }
+ ],
+ "sunucu": "",
+ "baslatici": {
+  "surum": "1.0",
+  "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/latest/download/ArdhalenBaslatici.exe"
+ },
+ "dosyalar": [
+  {
+   "yol": "Ardhalen.exe",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.4/Ardhalen.exe",
+   "sha256": "66b26ad96df7458ea917b632a73ac7c88bb058db24dbd11a457fd50435ab7b13",
+   "boyut": 84214784
+  },
+  {
+   "yol": "Ardhalen.pck",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.4/Ardhalen.pck",
+   "sha256": "d49002b51026835e581ab3eaf5df2b71164ddf0f79a10fbeca9a65174d7038e4",
+   "boyut": 1059635344
+  },
+  {
+   "yol": "DENEME_LISTESI_2.8.txt",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.4/DENEME_LISTESI_2.8.txt",
+   "sha256": "e4c2a24c539f519a477f1a2d2cc6ea0af690c0d3f1935ff07e233c11298b3c37",
+   "boyut": 5328
+  },
+  {
+   "yol": "GIZLILIK_POLITIKASI.md",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.4/GIZLILIK_POLITIKASI.md",
+   "sha256": "b25ed4cd9d0e94446b4ca0a66316463777b779058bb55bd1b19602d072f71973",
+   "boyut": 2169
+  },
+  {
+   "yol": "KULLANIM_SOZLESMESI.txt",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.4/KULLANIM_SOZLESMESI.txt",
+   "sha256": "cd14a29ce70b08f42fcfb2722e57d502baded806c1ce9c3c80937663ff6000fe",
+   "boyut": 2615
+  },
+  {
+   "yol": "OKU BENI.txt",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.4/OKU_BENI.txt",
+   "sha256": "1cfa823996b93a3e808032b8678707ae0e350f6816d933a5f016d377d61b1dc6",
+   "boyut": 14176
+  },
+  {
+   "yol": "Sorun Giderme.bat",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.4/Sorun_Giderme.bat",
+   "sha256": "4be3d5ef0c1745958eb5a678348340badae9ccba7b5ce7a432b0753036ee7cfe",
+   "boyut": 355
+  },
+  {
+   "yol": "TESTCI_NOTU.txt",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.4/TESTCI_NOTU.txt",
+   "sha256": "5c3446d6c60ff2e4cd89969ee217ab8aee623a3c604ea144b8e6539f24f89229",
+   "boyut": 3513
+  },
+  {
+   "yol": "Uyumlu Mod.bat",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.4/Uyumlu_Mod.bat",
+   "sha256": "9bf8c671c0e7ff5e9d36e70820d6e3740ca4ad7eb4ce0c9297f1bb50808fa933",
+   "boyut": 78
+  },
+  {
+   "yol": "icon.ico",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.4/icon.ico",
+   "sha256": "44dd5ac568784fd8f5787fb5abd8378640bea30db48d37fe8bb145a98eb3e14b",
+   "boyut": 15318
+  },
+  {
+   "yol": "licenses/Godot_MIT.txt",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.4/licenses__Godot_MIT.txt",
+   "sha256": "e9a96373ee89b7538126a8de83e8e0d476ef0d0a9f83d676ec1daa5b967c6991",
+   "boyut": 1319
+  },
+  {
+   "yol": "licenses/MakeHuman_CC0.txt",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.4/licenses__MakeHuman_CC0.txt",
+   "sha256": "a629bada50e3baa3ac50b648ebfc4f1075c0517654dee5b2fbc71088fa230079",
+   "boyut": 509
+  },
+  {
+   "yol": "licenses/Mixamo_ve_PolyHaven.txt",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.4/licenses__Mixamo_ve_PolyHaven.txt",
+   "sha256": "d72c82ea4ecc1bfbabd66414ecd5b003621fc90f2a880952f1601640f2cf95a8",
+   "boyut": 1010
+  },
+  {
+   "yol": "licenses/Varliklar.txt",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.4/licenses__Varliklar.txt",
+   "sha256": "a75ee01e58353e0db264c181514d5eb9ffbe5c7d368517c8b17d64524aeaac5c",
+   "boyut": 6869
+  }
+ ]
+}
