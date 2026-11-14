@@ -13,7 +13,7 @@ class StrategyParams:
     # (EURUSD 2017 saatlik, 2019-20 M15) kazandırmadı. Sınamak için ("sweep", "pullback") yazılabilir.
     setups: tuple = ("pullback",)
     atr_period: int = 14
-    min_bars: int = 600               # değerlendirme için gereken en az M15 çubuğu
+    min_bars: int = 600               # değerlendirme için gereken en az çubuk
     h1_ema: int = 50                  # yön: H1 kapanışlarının EMA'sı
     h4_ema: int = 20                  # yön: H4 kapanışlarının EMA'sı
     asia_end_hour: int = 7            # UTC; Asya aralığı 00:00 - bu saat
@@ -22,7 +22,7 @@ class StrategyParams:
     sweep_fresh_bars: int = 4         # süpürmeden önce bu kadar çubuk seviyenin doğru tarafında kapanmış olmalı
     sweep_close_frac: float = 0.6     # süpürme çubuğu aralığının bu kadarını geri almış olmalı
     sweep_min_range_atr: float = 0.8
-    strong_range_atr: float = 1.5     # bu kadar geniş çubuk +1 kanaat puanı
+    strong_range_atr: float = 1.5     # süpürmede bu kadar geniş çubuk +1 kanaat puanı (geri çekilmede kullanılmaz)
     pullback_ema_fast: int = 20
     pullback_ema_slow: int = 50
     pullback_touch_bars: int = 3
@@ -82,13 +82,17 @@ class Config:
 
     @staticmethod
     def load(path: str | Path) -> "Config":
-        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+        raw = json.loads(Path(path).read_text(encoding="utf-8-sig"))     # Not Defteri/PowerShell BOM'una dayanıklı
+        if not isinstance(raw, dict):
+            raise ValueError("yapılandırma bir JSON nesnesi olmalı")
         known = {f.name for f in fields(Config)}
         unknown = set(raw) - known
         if unknown:
             raise ValueError(f"Bilinmeyen ayar(lar): {sorted(unknown)}")
         strat = StrategyParams(**raw.pop("strategy", {}))
         strat.setups = tuple(strat.setups)
+        if isinstance(strat.bar_minutes, float) and strat.bar_minutes.is_integer():
+            strat.bar_minutes = int(strat.bar_minutes)
         cfg = Config(strategy=strat, **raw)
         cfg.risk_tiers = {int(k): float(v) for k, v in cfg.risk_tiers.items()}
         cfg.entry_hours = tuple(cfg.entry_hours)
@@ -96,10 +100,10 @@ class Config:
         return cfg
 
     def validate(self) -> None:
-        if not self.symbols:
-            raise ValueError("symbols boş: en az bir sembol tanımlayın")
+        if not isinstance(self.symbols, dict) or not self.symbols:
+            raise ValueError('symbols boş ya da hatalı: {"EURUSD": {"usd_beta": -1}, ...} biçiminde olmalı')
         for name, s in self.symbols.items():
-            if s.get("usd_beta") not in (-1, 0, 1):
+            if not isinstance(s, dict) or s.get("usd_beta") not in (-1, 0, 1):
                 raise ValueError(f"{name}: usd_beta -1, 0 ya da 1 olmalı")
         if max(self.risk_tiers.values()) > 0.02:
             raise ValueError("risk_tiers: işlem başına risk %2'yi aşamaz")
@@ -109,7 +113,8 @@ class Config:
             raise ValueError("entry_hours ve flat_hour tutarsız")
         if not self.strategy.setups or set(self.strategy.setups) - {"sweep", "pullback"}:
             raise ValueError('strategy.setups "sweep" ve/veya "pullback" içermeli')
-        if self.strategy.bar_minutes not in (5, 15, 30, 60):
+        if isinstance(self.strategy.bar_minutes, bool) or not isinstance(self.strategy.bar_minutes, int) \
+                or self.strategy.bar_minutes not in (5, 15, 30, 60):
             raise ValueError("strategy.bar_minutes 5, 15, 30 ya da 60 olmalı")
         if not 0 < self.dd_half_risk < self.dd_halt < 1:
             raise ValueError("dd_half_risk < dd_halt olmalı")

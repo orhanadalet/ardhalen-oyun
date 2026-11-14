@@ -144,7 +144,10 @@ class MT5Broker:
             if code and code[0] < 0:                         # negatif kod = hata; boş geçmiş de None dönebilir
                 raise RuntimeError(f"İşlem geçmişi okunamadı: {code}")
             return []
-        out = [(self._utc(d.time), float(d.profit)) for d in deals if d.type == self.mt5.DEAL_TYPE_BALANCE]
+        # Bakiye, kredi, düzeltme ve bonus kayıtları özkaynağı işlem dışı nedenle değiştirir: hepsi akıştır.
+        kinds = {getattr(self.mt5, n) for n in ("DEAL_TYPE_BALANCE", "DEAL_TYPE_CREDIT", "DEAL_TYPE_CORRECTION",
+                                                "DEAL_TYPE_BONUS") if hasattr(self.mt5, n)}
+        out = [(self._utc(d.time), float(d.profit)) for d in deals if d.type in kinds]
         return [(t, a) for t, a in out if t > since]
 
     # ------------------------------------------------------------------ Broker arayüzü

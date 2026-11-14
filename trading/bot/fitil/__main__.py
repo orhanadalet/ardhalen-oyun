@@ -55,7 +55,7 @@ def main() -> None:
         cfg = Config.load(a.config)
     except FileNotFoundError:
         raise SystemExit(f"Yapılandırma dosyası bulunamadı: {a.config}  (config.example.json dosyasını kopyalayın)")
-    except (ValueError, TypeError, KeyError) as e:
+    except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
         raise SystemExit(f"Yapılandırma hatası ({a.config}): {e}")
     work = Path(a.workdir)
     work.mkdir(parents=True, exist_ok=True)
@@ -79,8 +79,8 @@ def main() -> None:
         engine = Engine(broker, cfg, state_path=work / "fitil_state.json", journal_path=work / "fitil_journal.csv",
                         dry_run=not a.trade)
         if a.reset_peak:
-            engine.reset_peak(acct.equity)
-            print(f"Düşüş freni sıfırlandı: zirve = {acct.equity:.2f}")
+            engine.request_peak_reset()
+            print("Düşüş freni, para akışları işlendikten sonra ilk turda sıfırlanacak.")
         try:
             engine.run()
         except KeyboardInterrupt:

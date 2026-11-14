@@ -27,16 +27,28 @@ class SimMT5:
     ORDER_FILLING_FOK, ORDER_FILLING_IOC, ORDER_FILLING_RETURN = 0, 1, 2
     TRADE_RETCODE_PLACED, TRADE_RETCODE_DONE, TRADE_RETCODE_DONE_PARTIAL = 10008, 10009, 10010
     TRADE_RETCODE_INVALID_STOPS, TRADE_RETCODE_REJECT = 10016, 10006
-    DEAL_TYPE_BALANCE = 2
+    DEAL_TYPE_BALANCE, DEAL_TYPE_CREDIT, DEAL_TYPE_CHARGE, DEAL_TYPE_CORRECTION, DEAL_TYPE_BONUS = 2, 3, 4, 5, 6
+    TRADE_RETCODE_REQUOTE = 10004
 
     def __init__(self, paper, zone: str = "America/New_York", plus_hours: float = 7, magic_of_others: int = 0,
-                 demo: bool = True, login: int = 424242, expected_timeframe: int | None = None):
+                 demo: bool = True, login: int = 424242, expected_timeframe: int | None = None,
+                 position_lag_calls: int = 0, stops_level_points: int = 0, filling_mode: int = 1,
+                 deal_lag_calls: int = 0, max_deviation_check: bool = True):
         self.paper, self.zone, self.plus = paper, ZoneInfo(zone), timedelta(hours=plus_hours)
         self.demo, self.login, self.connected = demo, login, True
         self.magic: dict[int, int] = {}            # pozisyon bileti -> magic
         self.requests: list[dict] = []
         self.fail_positions = False
         self.expected_timeframe = expected_timeframe
+        self.position_lag_calls = position_lag_calls      # emirden sonra pozisyon listesi bu kadar çağrı gecikir
+        self._hidden: dict[int, int] = {}
+        self.stops_level_points = stops_level_points
+        self.filling_mode = filling_mode                  # 1 = FOK, 2 = IOC, 3 = ikisi, 0 = yalnız RETURN
+        self.deal_lag_calls = deal_lag_calls              # bakiye kaydı geçmişte bu kadar çağrı geç görünür
+        self._deal_calls: dict[tuple, int] = {}
+        self.max_deviation_check = max_deviation_check
+        self.wall_extra = 0.0                             # canlı piyasa: beklerken tick saati ilerler
+        self.price_drift = 0.0                            # emir anında fiyat kayması (requote sınaması)
         self._err = (1, "Success")
 
     # --- zaman: UTC -> sunucu epoch'u ---
@@ -72,12 +84,22 @@ class SimMT5:
             return None
         s = self.paper.specs[symbol]
         return NS(digits=s.digits, point=s.point, volume_min=s.volume_min, volume_step=s.volume_step,
-                  volume_max=s.volume_max, trade_stops_level=0, trade_mode=4, filling_mode=1,
+                  volume_max=s.volume_max, trade_stops_level=self.stops_level_points, trade_mode=4,
+                  filling_mode=self.filling_mode,
                   trade_contract_size=self.paper.contract[symbol])
 
     def symbol_info_tick(self, symbol):
         t = self.paper.tick(symbol)
-        return None if t is None else NS(bid=t.bid, ask=t.ask, time=self.srv(t.time))
+        if t is None:
+            return None
+        return NS(bid=t.bid, ask=t.ask, time=self.srv(t.time + timedelta(seconds=self.wall_extra)))
+
+    def advance_wall(self, seconds: float) -> None:
+        """sleep yerine kullanılır: gerçek zaman ilerler, yeni tick gelir."""
+        self.wall_extra += seconds
+
+    def wall_now(self):
+        return self.paper.now() + timedelta(seconds=self.wall_extra)
 
     def copy_rates_from_pos(self, symbol, timeframe, start_pos, count):
         if self.expected_timeframe is not None and timeframe != self.expected_timeframe:
@@ -97,9 +119,15 @@ class SimMT5:
         if self.fail_positions:
             self._err = (-10004, "No IPC connection")
             return None
-        return tuple(NS(ticket=p.ticket, symbol=p.symbol, type=0 if p.direction > 0 else 1, volume=p.lots,
-                        price_open=p.entry, sl=p.sl, tp=0.0, time=self.srv(p.open_time),
-                        magic=self.magic.get(p.ticket, 0)) for p in self.paper.positions())
+        out = []
+        for p in self.paper.positions():
+            if self._hidden.get(p.ticket, 0) > 0:          # emir yeni işlendi: liste henüz güncellenmedi
+                self._hidden[p.ticket] -= 1
+                continue
+            out.append(NS(ticket=p.ticket, symbol=p.symbol, type=0 if p.direction > 0 else 1, volume=p.lots,
+                          price_open=p.entry, sl=p.sl, tp=0.0, time=self.srv(p.open_time),
+                          magic=self.magic.get(p.ticket, 0)))
+        return tuple(out)
 
     def order_calc_profit(self, order_type, symbol, volume, price_open, price_close):
         direction = 1 if order_type == self.ORDER_TYPE_BUY else -1
@@ -121,9 +149,22 @@ class SimMT5:
         for key in ("volume", "type", "price", "deviation", "magic", "type_time", "type_filling"):
             if key not in request:
                 raise AssertionError(f"istekte eksik alan: {key}")
-        if request["type_filling"] != self.ORDER_FILLING_FOK:                    # filling_mode=1 -> FOK beklenir
+        allowed = {self.ORDER_FILLING_RETURN}
+        if self.filling_mode & 1:
+            allowed.add(self.ORDER_FILLING_FOK)
+        if self.filling_mode & 2:
+            allowed.add(self.ORDER_FILLING_IOC)
+        if request["type_filling"] not in allowed or (self.filling_mode and request["type_filling"] == self.ORDER_FILLING_RETURN):
             return NS(retcode=10030, order=0, price=0.0, comment="unsupported filling mode")
         direction = 1 if request["type"] == self.ORDER_TYPE_BUY else -1
+        tick = self.paper.tick(symbol)
+        spec = self.paper.specs[symbol]
+        market = (tick.ask if direction > 0 else tick.bid) + self.price_drift
+        if self.max_deviation_check and abs(request["price"] - market) > request["deviation"] * spec.point + 1e-12:
+            return NS(retcode=10004, order=0, price=0.0, comment="requote")
+        if "position" not in request and self.stops_level_points:
+            if (market - request.get("sl", 0.0)) * direction < self.stops_level_points * spec.point - 1e-12:
+                return NS(retcode=self.TRADE_RETCODE_INVALID_STOPS, order=0, price=0.0, comment="invalid stops")
         if "position" in request:                                                # kapatma: ters yönde işlem
             pos = next((p for p in self.paper.positions() if p.ticket == request["position"]), None)
             if pos is None or direction != -pos.direction or abs(request["volume"] - pos.lots) > 1e-9:
@@ -134,8 +175,16 @@ class SimMT5:
         if not res.ok:
             return NS(retcode=self.TRADE_RETCODE_INVALID_STOPS, order=0, price=0.0, comment=res.message)
         self.magic[res.ticket] = request["magic"]
+        if self.position_lag_calls:
+            self._hidden[res.ticket] = self.position_lag_calls
         return NS(retcode=self.TRADE_RETCODE_DONE, order=500_000 + res.ticket, price=res.price, comment="done")
 
     def history_deals_get(self, date_from, date_to):
-        out = [NS(type=self.DEAL_TYPE_BALANCE, profit=a, time=self.srv(t)) for t, a in self.paper._flows]
+        out = []
+        for t, a in self.paper._flows:
+            n = self._deal_calls.get((t, a), 0)
+            self._deal_calls[(t, a)] = n + 1
+            if n < self.deal_lag_calls:                    # özkaynak değişti ama kayıt geçmişte henüz yok
+                continue
+            out.append(NS(type=self.DEAL_TYPE_BALANCE, profit=a, time=self.srv(t)))
         return tuple(d for d in out if date_from <= d.time <= date_to)

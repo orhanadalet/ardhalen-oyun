@@ -1,14 +1,16 @@
-"""Fitil'i geçmiş M15 verisinde çalıştırır: canlıdaki AYNI strateji ve motor kodu, simüle broker.
+"""Fitil'i geçmiş veride çalıştırır: canlıdaki AYNI strateji ve motor kodu, simüle broker.
 
     python -m fitil.backtest --config config.json --data ../data [--start 2023-01-01] [--equity 10000]
 
 Veri: --data klasöründe <SEMBOL>.csv (config'teki sembol adıyla). Desteklenen biçimler:
-  - MT5 çubuk dışa aktarımı (<DATE> <TIME> <OPEN> <HIGH> <LOW> <CLOSE> ...), M15 ya da M1
+  - MT5 çubuk dışa aktarımı (<DATE> <TIME> <OPEN> <HIGH> <LOW> <CLOSE> ...)
   - HistData M1 ASCII (YYYYMMDD HHMMSS;O;H;L;C;V), başlıksız
   - Dukascopy dışa aktarımı (Gmt time,Open,High,Low,Close,Volume; gün.ay.yıl)
-M1 verisi M15'e toplanır. Zamanlar UTC kabul edilir; MT5 sunucu saatindeyse --tz-shift ile düzeltin.
+  - pandas biçimi (ilk sütun zaman; saat dilimi ekliyse UTC'ye çevrilir)
+Hedeften sık veri (ör. M1) config'teki zaman dilimine toplanır. Zamanlar UTC kabul edilir; MT5 sunucu
+saatindeyse --tz-shift ile düzeltin.
 
-Simülasyonun sınırları: emirler çubuk kapanış fiyatından dolar, stoplar M15 çubuğu içinde
+Simülasyonun sınırları: emirler çubuk kapanış fiyatından dolar, stoplar çubuk içinde
 işlenir (çubuk içi sıralama bilinmez), spread sabittir. Sonuçlar iyimser olabilir.
 """
 from __future__ import annotations
@@ -57,10 +59,13 @@ def sim_settings(symbol: str, entry: dict) -> dict:
 def load_m15(path: str | Path, tz_shift_hours: float = 0.0, minutes: int = 15) -> pd.DataFrame:
     """Çubuk dosyasını okur ve `minutes` dakikalık çubuklara getirir (daha sık veri toplanır)."""
     path = Path(path)
-    first = path.read_text(encoding="utf-8", errors="ignore")[:200].splitlines()[0]
+    head = path.read_bytes()[:4]
+    enc = "utf-16" if head[:2] in (b"\xff\xfe", b"\xfe\xff") else "utf-8-sig"      # BOM'lu dosyalar (Not Defteri, PowerShell)
+    with path.open(encoding=enc, errors="replace") as f:
+        first = f.readline().strip()
     if first.startswith(",") or first.lower().startswith(("time,", "datetime,", "gmt time,", "local time,")):
         # ilk sütun zaman: pandas biçimi ya da Dukascopy dışa aktarımı ("01.02.2017 22:00:00.000" = 1 Şubat)
-        df = pd.read_csv(path, index_col=0)
+        df = pd.read_csv(path, index_col=0, encoding=enc)
         df.columns = [c.strip().lower() for c in df.columns]
         stamps = df.index.astype(str)
         if len(stamps) and len(stamps[0]) >= 10 and stamps[0][2] == "." and stamps[0][5] == ".":
@@ -72,18 +77,20 @@ def load_m15(path: str | Path, tz_shift_hours: float = 0.0, minutes: int = 15) -
                 idx = idx - pd.to_timedelta(offset, unit="m")              # yerel -> UTC
             df.index = idx
         else:
-            df.index = pd.to_datetime(stamps)
+            aware = stamps.str.contains(r"[+-]\d{2}:?\d{2}$|Z$").any()        # saat dilimi ekli zaman damgaları
+            idx = pd.DatetimeIndex(pd.to_datetime(stamps, utc=True) if aware else pd.to_datetime(stamps))
+            df.index = idx.tz_convert("UTC").tz_localize(None) if idx.tz is not None else idx
         if "volume" in df.columns:                                         # kapalı piyasa dolgusu: hacimsiz düz çubuklar
             df = df[~((df["volume"] == 0) & (df["high"] == df["low"]))]
     elif "<" in first or "date" in first.lower():
-        df = pd.read_csv(path, sep=None, engine="python")
+        df = pd.read_csv(path, sep=None, engine="python", encoding=enc)
         df.columns = [c.strip().strip("<>").lower() for c in df.columns]
         stamp = df["date"].astype(str).str.replace(".", "-", regex=False)
         if "time" in df.columns:
             stamp = stamp + " " + df["time"].astype(str)
         df.index = pd.to_datetime(stamp)
     else:
-        df = pd.read_csv(path, sep=";", header=None, names=["stamp", "open", "high", "low", "close", "vol"])
+        df = pd.read_csv(path, sep=";", header=None, names=["stamp", "open", "high", "low", "close", "vol"], encoding=enc)
         df.index = pd.to_datetime(df["stamp"], format="%Y%m%d %H%M%S")
     df = df[COLS].astype(float)
     df.index = df.index - pd.Timedelta(hours=tz_shift_hours)
@@ -108,8 +115,12 @@ def run(data: dict[str, pd.DataFrame], cfg: Config, equity: float = 10_000.0, st
         data = {s: d.loc[:pd.Timestamp(end)] for s, d in data.items()}
     sim = {s: sim_settings(s, cfg.symbols[s]) for s in data}
     specs = {s: Spec(s, v["digits"], 10.0 ** -v["digits"], 0.01, 0.01, 100.0) for s, v in sim.items()}
+    if any(len(d) == 0 for d in data.values()):
+        raise ValueError("Seçilen aralıkta veri yok")
     first = max(d.index[min(len(d) - 1, cfg.strategy.min_bars)] for d in data.values())
     start = max(pd.Timestamp(start), first) if start is not None else first
+    if start > max(d.index[-1] for d in data.values()):
+        raise ValueError(f"Başlangıç ({start}) verinin bitişinden sonra")
     broker = PaperBroker(data, specs, {s: v["contract"] for s, v in sim.items()},
                          {s: v["usd_side"] for s, v in sim.items()}, {s: v["spread"] for s, v in sim.items()},
                          equity=equity, commission_per_lot=commission_per_lot,
@@ -127,6 +138,11 @@ def run(data: dict[str, pd.DataFrame], cfg: Config, equity: float = 10_000.0, st
             values[-1] = broker.account().equity
         if not broker.advance():
             break
+    for p in broker.positions():               # veri bitti: açık kalan pozisyon son fiyattan kapatılıp sayılır
+        broker.close(p)
+        broker.closed[-1]["reason"] = "veri sonu"
+    if values:
+        values[-1] = broker.account().equity
     trades = pd.DataFrame(broker.closed)
     return trades, pd.Series(values, index=pd.DatetimeIndex(days), name="equity"), engine
 
@@ -194,7 +210,9 @@ def walk_forward(data: dict[str, pd.DataFrame], cfg: Config, grid: dict[str, lis
     first = max(d.index[min(len(d) - 1, cfg.strategy.min_bars)] for d in data.values())
     last = min(d.index[-1] for d in data.values())
     folds, oos = [], []
-    t0 = first
+    # Dilim sınırları gece yarısına (UTC) hizalanır: o saatte pozisyon yoktur (gün sonu kapanışı) ve giriş
+    # yapılmaz, yani hiçbir işlem iki dilime bölünmez ya da iki kez sayılmaz.
+    t0 = first.normalize() + pd.Timedelta(days=1)
     while t0 + pd.Timedelta(days=train_days + test_days) <= last:
         tr_end = t0 + pd.Timedelta(days=train_days)
         te_end = tr_end + pd.Timedelta(days=test_days)
@@ -234,12 +252,18 @@ def main() -> None:
     ap.add_argument("--train-days", type=int, default=120)
     ap.add_argument("--test-days", type=int, default=30)
     a = ap.parse_args()
-    cfg = Config.load(a.config)
+    try:
+        cfg = Config.load(a.config)
+    except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
+        raise SystemExit(f"Yapılandırma hatası ({a.config}): {e}")
     data = {}
     for s in cfg.symbols:
         p = Path(a.data) / f"{s}.csv"
         if p.exists():
-            data[s] = load_m15(p, a.tz_shift, cfg.strategy.bar_minutes)
+            try:
+                data[s] = load_m15(p, a.tz_shift, cfg.strategy.bar_minutes)
+            except (ValueError, KeyError, UnicodeError) as e:
+                raise SystemExit(f"Veri dosyası okunamadı ({p}): {e}")
             print(f"{s}: {len(data[s])} çubuk, {data[s].index[0]} -> {data[s].index[-1]}")
         else:
             print(f"{s}: {p} yok, atlandı")
@@ -257,7 +281,10 @@ def main() -> None:
                   f"kazanma {100 * (oos['pnl'] > 0).mean():.1f}%")
             print("Ortalama R, standart hatanın iki katından büyük değilse sonuç şanstan ayırt edilemez.")
         return
-    trades, equity, _ = run(data, cfg, a.equity, a.start, a.end)
+    try:
+        trades, equity, _ = run(data, cfg, a.equity, a.start, a.end)
+    except ValueError as e:
+        raise SystemExit(f"Backtest çalıştırılamadı: {e}")
     print()
     print(report(trades, equity))
     if a.trades_out and len(trades):

@@ -109,6 +109,8 @@ trading/
   - MT5 terminali bu ortamda çalıştırılamaz (Wine yok, apt ve MetaQuotes sunucuları ağ politikasıyla kapalı).
     Yerine `tests/mt5_sim.py` simülatörü var: `mt5_broker.py` değişirse
     `LivePathAgainstSimulatedTerminal` testleri (canlı yol = doğrudan simülasyon) geçmeli.
+    Simülatör gecikmeli pozisyon listesi, stop seviyesi, IOC dolum, requote ve geç görünen bakiye kaydını
+    da taklit eder (`SimulatedTerminalQuirks`).
   - Maliyet duyarlılığı: geri çekilme avantajı EURUSD'de spread 2 pipte küçülüyor, 3 pipte kayboluyor.
     Kullanıcıya düşük spread'li hesap gerektiğini söyle.
   - Para akışı (yatırma/çekme) mantığı `engine._apply_flows` içinde; değiştirirsen

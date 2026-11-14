@@ -1,13 +1,14 @@
 """Sinyal mantığı. Saf fonksiyon: kapanmış M15 çubukları girer, sinyal ya da None çıkar.
 
 İki kurulum:
-  1) Likidite süpürmesi (sahte kırılım): fiyat önceki gün tepe/dibini ya da Asya aralığını
+  1) Likidite süpürmesi (sahte kırılım; config'te setups ile açılır): fiyat önceki gün tepe/dibini ya da Asya aralığını
      fitille aşar, çubuk geri içeride ve güçlü kapanır -> süpürmenin tersine işlem.
   2) Trend geri çekilmesi: H1 ve H4 aynı yönde, fiyat M15 EMA'sına çekilip trend yönünde
      önceki çubuğun ucunu kırarak kapanır.
 Stop her zaman yapının ötesindedir; sabit kâr hedefi yoktur (çıkışı engine yönetir).
 
-DURUM: kurallar gerçek gün içi veride henüz sınanmadı.
+DURUM: gerçek veride sınandı (bkz. bot/README.md). Süpürme hiçbir veride kazandırmadı ve varsayılan olarak
+kapalıdır; geri çekilme yalnızca EURUSD'nin bir döneminde kazandırdı. Güvenilir avantaj gösterilmiş değildir.
 """
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Motor: yeni M15 çubuğunu yakalar, sinyali değerlendirir, riski boyutlandırır, pozisyonu yönetir.
+"""Motor: yeni çubuğu (config'teki zaman dilimi) yakalar, sinyali değerlendirir, riski boyutlandırır, pozisyonu yönetir.
 
 step() tek bir tur atar; run() bunu canlıda scan_interval_sec aralıkla tekrarlar.
 Koruma brokerdadır: her emir stop-loss ile gönderilir, bot dursa da stop yerinde kalır.
@@ -46,7 +46,10 @@ class Engine:
             t = datetime.fromisoformat(x)
             self._blackouts.append(t.astimezone(timezone.utc).replace(tzinfo=None) if t.tzinfo else t)
         self.bar = timedelta(minutes=cfg.strategy.bar_minutes)
-        self._flow_pending = False        # yeni akış görüldü; özkaynağın onu yansıttığından emin olmak için bir tur beklenir
+        # Yeni akış görüldüğünde uygulanmadan önce bir tur beklenir (özkaynak onu kesin yansıtsın). Beklerken
+        # yeni bir kayıt daha gelirse yeniden beklenir: uygulanan akış kümesi iki ardışık turda aynı olmalı.
+        self._flow_seen: frozenset | None = None
+        self._reset_peak_requested = False
         self._flow_error_at: datetime | None = None
         self._last_block: dict[str, str | None] = {}
         self._close_retry: dict[int, datetime] = {}
@@ -59,9 +62,14 @@ class Engine:
             os.replace(tmp, self.state_path)             # yarım yazılmış dosya kalmaz
 
     def reset_peak(self, equity: float) -> None:
-        """Düşüş frenini sıfırlar: zirve = şimdiki özkaynak. Yalnızca kullanıcı isteğiyle çağrılır."""
-        self.state["peak_equity"] = equity * self.state["adj"]
+        """Düşüş frenini sıfırlar: zirve = şimdiki (akıştan arındırılmış) özkaynak. Yalnızca kullanıcı isteğiyle."""
+        self.state.update(peak_equity=equity * self.state["adj"], peak_log=[])
         self._save()
+
+    def request_peak_reset(self) -> None:
+        """Sıfırlamayı ilk 'akışlar işlenmiş' tura erteler: bot kapalıyken yapılan para yatırma/çekme önce
+        hesaba katılmalı, yoksa sıfırlanan zirve hemen ardından yeniden bozulur."""
+        self._reset_peak_requested = True
 
     def _journal(self, now: datetime, event: str, symbol: str = "", **kw) -> None:
         try:
@@ -127,15 +135,16 @@ class Engine:
                 self._journal(now, "UYARI", "", neden="para akışı geçmişi okunamadı", hata=str(e))
             return True
         if not flows:
-            self._flow_pending = False
+            self._flow_seen = None
             if now - since > timedelta(hours=6):
                 self.state["flows_until"] = (now - timedelta(hours=1)).isoformat()
                 self._save()
             return True
-        if not self._flow_pending:
-            self._flow_pending = True
+        seen = frozenset(flows)
+        if seen != self._flow_seen:              # ilk kez görüldü ya da bekleme sırasında yeni kayıt geldi
+            self._flow_seen = seen
             return False
-        self._flow_pending = False
+        self._flow_seen = None
         flow = sum(a for _, a in flows)
         first = min(t for t, _ in flows)
         if equity > 0 and equity - flow > 0:
@@ -155,8 +164,10 @@ class Engine:
                     self.state["peak_log"] = [x for x in self.state["peak_log"] if x[0] < edge]
             if dt and datetime.fromisoformat(dt) >= first:
                 self.state["day_start_equity"] *= k
-        if flow > 0:
-            self.state["withdraw_base"] += flow
+        # Çekim tabanı akışla birlikte kayar: yatırılan para kâr sayılmaz, çekilen para tabanı düşürür.
+        self.state["withdraw_base"] += flow
+        if self.state["withdraw_base"] <= 0:
+            self.state["withdraw_base"] = equity
         self.state["flows_until"] = max(t for t, _ in flows).isoformat()
         self._journal(now, "AKIŞ", "", tutar=round(flow, 2), ozkaynak=round(equity, 2))
         self._save()
@@ -174,7 +185,9 @@ class Engine:
         gain = equity - self.state["withdraw_base"]
         amount = round(max(0.0, gain) * c.withdraw_frac, 2)
         if amount > 0:
-            self.state["withdraw_base"] = equity - amount
+            # Taban şimdiki özkaynağa çekilir; öneri çekilirse akış olarak tabandan düşülür, çekilmezse
+            # kalan kâr ana paraya eklenmiş sayılır ve yeniden önerilmez.
+            self.state["withdraw_base"] = equity
             self._journal(now, "ÇEKİM", "", oneri=amount, ozkaynak=round(equity, 2),
                           not_="zirveyi aşan kârın oranı; çekmek sizin kararınız")
         self._save()
@@ -228,6 +241,11 @@ class Engine:
         settled = self._apply_flows(now, acct.equity)
         if settled or not self.state["day"]:
             self._roll_day(now, acct.equity)
+        if settled and self._reset_peak_requested:
+            self._reset_peak_requested = False
+            self.reset_peak(acct.equity)
+            self._journal(now, "SIFIRLAMA", "", neden="düşüş freni kullanıcı isteğiyle sıfırlandı",
+                          zirve=round(self.state["peak_equity"], 2))
         positions = b.positions()
 
         for p in [p for p in positions if p.sl <= 0]:        # güvenlik: stopsuz pozisyon tutulmaz
@@ -248,7 +266,7 @@ class Engine:
         if now.hour >= c.flat_hour or now.weekday() >= 5:
             for p in positions:
                 self._close(now, p, "gün sonu")
-            if now.hour >= c.flat_hour and now.weekday() < 5 and (self.dry_run or not b.positions()):
+            if settled and now.hour >= c.flat_hour and now.weekday() < 5 and (self.dry_run or not b.positions()):
                 self._withdraw_hint(now, b.account().equity)
             return
 

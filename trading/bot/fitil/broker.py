@@ -70,7 +70,7 @@ class Broker(Protocol):
     def spec(self, symbol: str) -> Spec: ...
     def tick(self, symbol: str) -> Tick | None: ...
     def last_bar_time(self, symbol: str) -> datetime | None: ...       # son KAPANMIŞ çubuğun açılış zamanı (UTC)
-    def bars(self, symbol: str, count: int) -> pd.DataFrame: ...        # kapanmış M15 çubukları, UTC indeks
+    def bars(self, symbol: str, count: int) -> pd.DataFrame: ...        # kapanmış çubuklar, UTC indeks
     def positions(self) -> list[Pos]: ...                               # yalnızca bu botun pozisyonları
     def loss_per_lot(self, symbol: str, direction: int, entry: float, sl: float) -> float: ...
     def margin_ok(self, symbol: str, direction: int, lots: float) -> bool: ...
@@ -90,7 +90,7 @@ def round_lots_down(spec: Spec, lots: float) -> float:
 
 
 class PaperBroker:
-    """Geçmiş M15 çubukları üzerinde çalışan simüle broker (test ve backtest için).
+    """Geçmiş çubuklar üzerinde çalışan simüle broker (test ve backtest için).
 
     Saat T'de: T'den önce açılmış çubuklar kapanmıştır; tick = son kapanış (bid), ask = bid+spread.
     Piyasa emri o anki tick'ten dolar. advance() bir çubuk ilerletir ve yeni çubukta stopları işler;
@@ -113,7 +113,10 @@ class PaperBroker:
         self.timeline = sorted(set().union(*[df.index for df in data.values()]))
         self._i = 0
         if start is not None:
-            self._i = next(i for i, t in enumerate(self.timeline) if t >= pd.Timestamp(start))
+            later = [i for i, t in enumerate(self.timeline) if t >= pd.Timestamp(start)]
+            if not later:
+                raise ValueError(f"Başlangıç ({start}) verinin bitişinden sonra")
+            self._i = later[0]
         self._last: dict[str, float] = {}
         for s, df in data.items():
             prior = df.loc[df.index < self.clock]

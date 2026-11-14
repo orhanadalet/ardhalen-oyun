@@ -4,7 +4,7 @@ Python ile yazılmış, MetaTrader 5'e bağlanan gün içi bot. 7 major parite, 
 her M15 çubuğu kapanışında tarama yapar.
 
 **Durum (Kasım 2026):**
-- Altyapı 102 testle ve iki bağımsız kod incelemesiyle sınandı.
+- Altyapı 120 testle ve üç bağımsız kod incelemesiyle sınandı (toplam 37 bulgu, hepsi düzeltildi).
 - MT5 bağlantısı gerçek terminalde çalıştırılmadı: terminal yalnızca Windows'ta çalışır ve bu geliştirme
   ortamında kurulamıyor. Bunun yerine MT5'in Python arayüzünü taklit eden bir simülatör yazıldı
   (`tests/mt5_sim.py`): canlı kod yolu (bağdaştırıcı + motor + komut satırı) bu simülatöre karşı baştan
@@ -78,6 +78,8 @@ tıklamayla sinyal modunda başlatır.
   kesin tarihleri ve FOMC, CPI gibi verileri `blackouts` listesine siz yazın.
 - **Çekim önerisi:** cuma kapanışında, önceki zirveyi aşan kârın yarısı günlüğe "ÇEKİM" satırı olarak
   yazılır. Bot para çekemez; karar ve işlem sizindir. Oran `withdraw_frac` ile değişir.
+  Öneriyi çekmezseniz kalan kâr ana paraya eklenmiş sayılır ve yeniden önerilmez; öneri dışı çektiğiniz
+  ya da yatırdığınız para kâr hesabını bozmaz.
 
 ## Geçmiş veride sınama
 
@@ -133,7 +135,7 @@ Geri çekilme kurulumunun 2019-20 M15 sonucunun sağlamlığı:
   [-0,03R, +0,32R]. Yani olumlu ama istatistiksel olarak kanıtlanmış değil.
 
 Walk-forward (2019-20 M15; stop parametreleri 120 günlük geçmişte seçilip sonraki görülmemiş 30 günde
-sınandı): 8 dilimin 7'si pozitif, toplam 103 örnek dışı işlemde ortalama +0,21R (std. hata 0,15).
+sınandı): 8 dilimin 7'si pozitif, toplam 102 örnek dışı işlemde ortalama +0,28R (std. hata 0,16).
 Yön tutarlı, ama işlem sayısı kesin hüküm için hâlâ az.
 
 Aynı kurallar, parametre değiştirilmeden, 2019-20 verisinde başka koşullarda:
@@ -233,6 +235,7 @@ backtest aracının kendiliğinden kâr üretmediğini gösterir.
 Zirveden %20 düşüşte bot yeni giriş yapmayı bırakır ve günlüğe `ENGEL ... düşüş freni: sistem durdu`
 yazar. Bu durum kendiliğinden kalkmaz; amaç durup nedenini incelemektir. İnceledikten sonra
 `python -m fitil --config config.json --reset-peak` ile zirveyi şimdiki özkaynağa çekip devam edebilirsiniz.
+Bot kapalıyken para yatırdıysanız ya da çektiyseniz sıfırlama, o akış hesaba katıldıktan sonra yapılır.
 
 ## Sunucu saati
 

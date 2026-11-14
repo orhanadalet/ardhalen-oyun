@@ -412,7 +412,7 @@ class Hardening(unittest.TestCase):
         self.logs = []
 
     def _settle_flows(self, e, b):
-        """Akış ilk görüldüğü turda bekletilir, ikinci turda uygulanır."""
+        """Akış ilk görüldüğü turda bekletilir, ikinci turda (küme değişmediyse) uygulanır."""
         self.assertFalse(e._apply_flows(b.now(), b.account().equity))
         self.assertTrue(e._apply_flows(b.now(), b.account().equity))
 
@@ -494,13 +494,45 @@ class Hardening(unittest.TestCase):
         e._withdraw_hint(friday, 10_000.0)
         self.assertEqual(sum("ÇEKİM" in x for x in self.logs), 1)
         self.assertIn("oneri=500.0", [x for x in self.logs if "ÇEKİM" in x][0])
-        self.assertEqual(e.state["withdraw_base"], 9_500.0)
+        self.assertEqual(e.state["withdraw_base"], 10_000.0)             # taban şimdiki özkaynağa çekildi
         e._withdraw_hint(friday + timedelta(minutes=5), 10_000.0)        # aynı hafta: tekrar yok
         self.assertEqual(sum("ÇEKİM" in x for x in self.logs), 1)
         e._withdraw_hint(friday + timedelta(days=7), 9_400.0)            # zirvenin altında: öneri yok
         self.assertEqual(sum("ÇEKİM" in x for x in self.logs), 1)
         e._withdraw_hint(datetime(2024, 3, 14, 20, 0), 20_000.0)         # perşembe: öneri yok
         self.assertEqual(sum("ÇEKİM" in x for x in self.logs), 1)
+
+    def test_withdraw_base_follows_flows_both_ways(self):
+        b = at_end(self.df)
+        e = Engine(b, cfg(), log=self.logs.append)
+        e.state.update(day=b.now().strftime("%Y-%m-%d"), day_start_equity=10_000.0, peak_equity=10_000.0,
+                       flows_until=(b.now() - timedelta(hours=1)).isoformat(), withdraw_base=10_000.0)
+        b.deposit(-3_000.0)                                              # öneri dışı 3.000 çekim
+        self._settle_flows(e, b)
+        self.assertAlmostEqual(e.state["withdraw_base"], 7_000.0)
+        b.balance += 400.0                                               # 7.000 -> 7.400 kâr
+        e._withdraw_hint(datetime(2024, 3, 15, 20, 0), b.account().equity)
+        self.assertIn("oneri=200.0", [x for x in self.logs if "ÇEKİM" in x][0])   # yeniden 3.000 kazanmayı beklemez
+        b._flows.append((b.now() + timedelta(seconds=30), 5_000.0))     # yatırılan para kâr sayılmaz
+        b.balance += 5_000.0
+        self._settle_flows(e, b)
+        e.state["withdraw_week"] = ""
+        e._withdraw_hint(datetime(2024, 3, 22, 20, 0), b.account().equity)
+        self.assertEqual(sum("ÇEKİM" in x for x in self.logs), 1)
+
+    def test_hint_waits_while_a_flow_is_pending(self):
+        b = at_end(self.df)
+        clock = [datetime(2024, 3, 15, 20, 0, 0)]                        # cuma gün sonu
+        b.now = lambda: clock[0]
+        e = Engine(b, cfg(), log=self.logs.append)
+        e.state.update(day="2024-03-15", day_start_equity=10_000.0, peak_equity=10_000.0,
+                       flows_until=(clock[0] - timedelta(hours=1)).isoformat(), withdraw_base=10_000.0)
+        b.deposit(5_000.0)                                               # bot kapalıyken yatırıldı, ilk tur
+        for _ in range(4):
+            e.step()
+            clock[0] += timedelta(seconds=5)
+        self.assertFalse([x for x in self.logs if "ÇEKİM" in x])         # yatırılan para kâr diye önerilmedi
+        self.assertAlmostEqual(e.state["withdraw_base"], 15_000.0)
 
 
 class Backtest(unittest.TestCase):
@@ -1145,7 +1177,8 @@ class CommandLine(unittest.TestCase):
             self.assertEqual(code, 0, out)
             self.assertFalse(ran[0].dry_run)
             self.assertIn("EMİR GÖNDERİR", out)
-            self.assertAlmostEqual(ran[0].state["peak_equity"], 5_000.0)
+            self.assertAlmostEqual(ran[0].state["peak_equity"], 5_000.0)     # ilk turlarda sıfırlandı
+            self.assertEqual(ran[0].risk_factor(5_000.0), 1.0)
 
     def test_refuses_real_account_and_bad_config_with_clear_message(self):
         with tempfile.TemporaryDirectory() as d:
@@ -1207,6 +1240,228 @@ class CommandLine(unittest.TestCase):
             finally:
                 first.close()
             cli.acquire_lock(Path(d) / "fitil.lock").close()               # kilit bırakılınca yeniden alınabilir
+
+
+class ThirdReview(unittest.TestCase):
+    """Üçüncü incelemenin bulguları için regresyon testleri."""
+
+    def setUp(self):
+        self.df, _ = with_sweep_low(m15())
+        self.logs = []
+
+    def clocked(self, **kw):
+        b = at_end(self.df)
+        clock = [b.now()]
+        b.now = lambda: clock[0]
+        e = Engine(b, cfg(), log=self.logs.append, dry_run=True, **kw)
+
+        def scans(n):
+            for _ in range(n):
+                clock[0] += timedelta(seconds=5)
+                e.step()
+        return b, e, clock, scans
+
+    def test_reset_peak_waits_for_pending_deposit(self):
+        # Bot %21 düşüşte durmuş; kullanıcı kapalıyken para yatırıp --reset-peak ile başlatıyor.
+        b, e, clock, scans = self.clocked()
+        e.state.update(day=clock[0].strftime("%Y-%m-%d"), day_start_equity=7_900.0, peak_equity=10_000.0,
+                       flows_until=(clock[0] - timedelta(hours=2)).isoformat(), withdraw_base=10_000.0)
+        b.balance = 7_900.0
+        self.assertEqual(e.risk_factor(b.account().equity), 0.0)
+        b._flows.append((clock[0] - timedelta(hours=1), 4_000.0))
+        b.balance += 4_000.0
+        e.request_peak_reset()
+        scans(6)
+        self.assertAlmostEqual(e.drawdown(b.account().equity), 0.0, places=6)
+        self.assertEqual(e.risk_factor(b.account().equity), 1.0)
+        self.assertEqual(sum("SIFIRLAMA" in x for x in self.logs), 1)
+
+    def test_second_flow_arriving_during_deferral_is_deferred_too(self):
+        b, e, clock, scans = self.clocked()
+        e.step()
+        t = clock[0]
+        b._flows.append((t + timedelta(seconds=1), 100.0)); b.balance += 100.0       # A: kayıt ve özkaynak birlikte
+        scans(1)
+        b._flows.append((t + timedelta(seconds=6), 5_000.0))                          # B: kayıt göründü, özkaynak henüz değil
+        scans(1)
+        b.balance += 5_000.0                                                          # özkaynak bir tur sonra
+        scans(6)
+        self.assertAlmostEqual(e._adj(b.account().equity), 10_000.0, delta=0.01)
+        self.assertAlmostEqual(e.drawdown(b.account().equity), 0.0, places=6)
+
+    def test_credit_and_bonus_deals_count_as_flows_but_trades_do_not(self):
+        import time as _t
+        m = fake_mt5(server_offset_h=2)
+        m.DEAL_TYPE_CREDIT, m.DEAL_TYPE_CORRECTION, m.DEAL_TYPE_BONUS = 3, 5, 6
+        b = MT5Broker(cfg(), mt5=m, sleep=lambda x: None)
+        srv = _t.time() + 2 * 3600
+        m.deals = [types.SimpleNamespace(type=k, profit=v, time=srv - 60) for k, v in
+                   ((2, 100.0), (3, 50.0), (5, -5.0), (6, 30.0), (0, 999.0), (1, -999.0), (4, -7.0))]
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        self.assertEqual(sum(a for _, a in b.flows_since(now - timedelta(hours=1))), 175.0)
+
+    def test_config_is_forgiving_about_bom_and_strict_about_types(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "c.json"
+            p.write_bytes(b"\xef\xbb\xbf" + json.dumps({"symbols": {"EURUSD": {"usd_beta": -1}},
+                                                         "strategy": {"bar_minutes": 15.0, "setups": ["pullback"]}}).encode())
+            c = Config.load(p)
+            self.assertEqual((c.strategy.bar_minutes, type(c.strategy.bar_minutes), c.strategy.setups), (15, int, ("pullback",)))
+            for bad in ({"symbols": ["EURUSD"]}, {"symbols": {"EURUSD": "x"}}, {"symbols": {"EURUSD": {"usd_beta": -1}},
+                        "strategy": {"bar_minutes": 15.5}}, ["liste"]):
+                p.write_text(json.dumps(bad), encoding="utf-8")
+                with self.assertRaises((ValueError, TypeError)):
+                    Config.load(p)
+
+    def test_loader_handles_bom_utf16_and_timezone_aware_stamps(self):
+        df = m15(40, end="2024-03-13 09:00")
+        body = "Gmt time,Open,High,Low,Close,Volume\n" + "".join(
+            f"{t:%d.%m.%Y %H:%M:%S}.000,{r.open:.5f},{r.high:.5f},{r.low:.5f},{r.close:.5f},5\n" for t, r in df.iterrows())
+        with tempfile.TemporaryDirectory() as d:
+            for name, raw in (("bom.csv", b"\xef\xbb\xbf" + body.encode("utf-8")), ("u16.csv", body.encode("utf-16"))):
+                (Path(d) / name).write_bytes(raw)
+                got = bt.load_m15(Path(d) / name)
+                self.assertEqual((len(got), got.index[0], got.index[-1]), (40, df.index[0], df.index[-1]), name)
+            aware = df.copy()
+            aware.index = aware.index.tz_localize("UTC").tz_convert("Europe/Istanbul")       # +03:00 damgalı
+            aware.to_csv(Path(d) / "aware.csv")
+            got = bt.load_m15(Path(d) / "aware.csv")
+            self.assertIsNone(got.index.tz)
+            self.assertEqual(list(got.index), list(df.index))                                # UTC'ye çevrildi
+
+    def test_backtest_edge_cases_report_clearly_and_count_open_trades(self):
+        rng = np.random.default_rng(4)
+        idx = pd.date_range("2024-01-01", periods=96 * 20, freq="15min")
+        idx = idx[idx.weekday < 5]
+        c = 1.10 * np.exp(np.cumsum(rng.standard_t(4, len(idx)) * 0.0004))
+        o = np.concatenate([[1.10], c[:-1]])
+        w = np.abs(rng.normal(0, 0.0003, (2, len(idx))))
+        df = pd.DataFrame({"open": o, "high": np.maximum(o, c) + w[0], "low": np.minimum(o, c) - w[1], "close": c}, index=idx)
+        with self.assertRaises(ValueError):
+            bt.run({"EURUSD": df}, cfg(), start="2030-01-01")
+        with self.assertRaises(ValueError):
+            bt.run({"EURUSD": df}, cfg(), end="2020-01-01")
+        full, _, _ = bt.run({"EURUSD": df}, cfg())
+        mid = [t for t in full.itertuples() if pd.Timestamp(t.open_time).hour <= 12 and pd.Timestamp(t.close_time).hour >= 15]
+        self.assertTrue(mid, "test verisinde gün içinde açık kalan işlem yok")
+        cut = pd.Timestamp(mid[0].open_time) + pd.Timedelta(minutes=45)              # işlem açıkken veri bitiyor
+        part, eq, _ = bt.run({"EURUSD": df}, cfg(), end=cut)
+        last = part.iloc[-1]
+        self.assertEqual(pd.Timestamp(last.open_time), pd.Timestamp(mid[0].open_time))
+        self.assertEqual(last.reason, "veri sonu")
+        self.assertAlmostEqual(eq.iloc[-1], 10_000.0 + part.pnl.sum(), places=4)
+
+    def test_walk_forward_selection_ignores_data_after_training_window(self):
+        rng = np.random.default_rng(3)
+        idx = pd.date_range("2024-01-01", periods=2600, freq="1h")
+        idx = idx[idx.weekday < 5]
+        c = 1.10 * np.exp(np.cumsum(rng.standard_t(4, len(idx)) * 0.0008))
+        o = np.concatenate([[1.10], c[:-1]])
+        w = np.abs(rng.normal(0, 0.0006, (2, len(idx))))
+        df = pd.DataFrame({"open": o, "high": np.maximum(o, c) + w[0], "low": np.minimum(o, c) - w[1], "close": c}, index=idx)
+        conf = Config(symbols={"EURUSD": {"usd_beta": -1}}, strategy=StrategyParams(bar_minutes=60, min_bars=300))
+        conf.validate()
+        grid = {"max_stop_atr": [2.0, 3.0], "pullback_swing_bars": [3, 8]}
+        folds, oos = bt.walk_forward({"EURUSD": df}, conf, grid, train_days=40, test_days=20, min_trades=3)
+        tr_end = pd.Timestamp(folds.egitim.iloc[0].split("..")[1])
+        self.assertEqual(tr_end, tr_end.normalize())                                 # sınır gece yarısında
+        changed = df.copy()
+        later = changed.index > tr_end
+        changed.loc[later] = changed.loc[later] * np.linspace(1.0, 1.4, later.sum())[:, None]   # eğitimden SONRASI değişti
+        folds2, oos2 = bt.walk_forward({"EURUSD": changed}, conf, grid, train_days=40, test_days=20, min_trades=3)
+        self.assertEqual(folds.secilen.iloc[0], folds2.secilen.iloc[0])              # seçim etkilenmedi
+        self.assertEqual(folds.egitim_ort_R.iloc[0], folds2.egitim_ort_R.iloc[0])
+        self.assertNotEqual(list(folds.test_ort_R), list(folds2.test_ort_R))         # ama test sonuçları değişti
+        keys = list(zip(oos.symbol, pd.to_datetime(oos.open_time)))
+        self.assertEqual(len(keys), len(set(keys)))                                  # hiçbir işlem iki kez sayılmadı
+
+    def test_startup_errors_are_messages_not_tracebacks(self):
+        cl = CommandLine()
+        with tempfile.TemporaryDirectory() as d:
+            sim, path = cl.setup_files(d)
+            for bad in ({"symbols": ["EURUSD"]}, {"symbols": {"EURUSD": {"usd_beta": -1}}, "server_time": {"tz": "Yok/Boyle"}},
+                        {"symbols": {"EURUSD": {"usd_beta": -1}}, "recurring_blackouts": [{"weekday": 4, "time": "08:30", "tz": "Yok/Boyle"}]}):
+                path.write_text(json.dumps(bad), encoding="utf-8")
+                out, code, ran = cl.run_main(["--config", str(path), "--workdir", d], sim)
+                self.assertIn("Yapılandırma hatası", str(code), bad)
+                self.assertEqual(ran, [])
+
+
+class SimulatedTerminalQuirks(unittest.TestCase):
+    """Gerçek terminalin simülatörde varsayılan olarak bulunmayan davranışları: gecikmeler, stop seviyesi,
+    farklı dolum modu, fiyat kayması, otomatik saat farkı."""
+
+    def setup(self, sim_kw=None, cfg_kw=None):
+        from mt5_sim import SimMT5
+        df, _ = with_sweep_low(m15())
+        paper = at_end(df)
+        sim = SimMT5(paper, **(sim_kw or {}))
+        c = cfg(**(cfg_kw or {"server_time": {"tz": "America/New_York", "plus_hours": 7}}))
+        logs = []
+        live = MT5Broker(c, mt5=sim, sleep=sim.advance_wall, clock=sim.wall_now)
+        return paper, sim, Engine(live, c, log=logs.append), logs
+
+    def test_position_list_lagging_after_order_is_handled(self):
+        paper, sim, e, logs = self.setup({"position_lag_calls": 2})
+        e.step()
+        self.assertEqual(len(paper.positions()), 1)
+        self.assertEqual(e.state["trades_today"], 1)
+        self.assertIn(str(paper.positions()[0].ticket), e.state["tickets"])
+        self.assertTrue(any("GİRİŞ" in x for x in logs))
+        e.step()
+        self.assertEqual(len(paper.positions()), 1)                                  # ikinci pozisyon açılmadı
+
+    def test_ioc_only_symbol_gets_ioc_filling(self):
+        paper, sim, e, logs = self.setup({"filling_mode": 2})
+        e.step()
+        self.assertEqual(len(paper.positions()), 1)
+        self.assertEqual(sim.requests[0]["type_filling"], sim.ORDER_FILLING_IOC)
+
+    def test_broker_stop_level_blocks_too_tight_stop_before_sending(self):
+        paper, sim, e, logs = self.setup({"stops_level_points": 500})                # 50 pip: stop çok yakın kalır
+        e.step()
+        self.assertEqual(paper.positions(), [])
+        self.assertEqual(sim.requests, [])                                           # emir hiç gönderilmedi
+        self.assertTrue(any("stop mesafesi yetersiz" in x for x in logs))
+
+    def test_requote_is_journaled_and_leaves_state_clean(self):
+        paper, sim, e, logs = self.setup()
+        sim.price_drift = 0.01                                                       # emir anında fiyat 100 pip kaydı
+        e.step()
+        self.assertEqual(paper.positions(), [])
+        self.assertTrue(any("RED" in x and "10004" in x for x in logs))
+        self.assertEqual((e.state["trades_today"], e.state["tickets"]), (0, {}))
+
+    def test_auto_offset_mode_matches_configured_zone(self):
+        from mt5_sim import SimMT5
+        df, _ = with_sweep_low(m15())
+        paper = at_end(df)
+        sim = SimMT5(paper, zone="Etc/GMT-2", plus_hours=0)                          # sabit UTC+2 sunucu
+        auto = MT5Broker(cfg(), mt5=sim, sleep=sim.advance_wall, clock=sim.wall_now) # ayar yok: otomatik kestirim
+        self.assertEqual(auto._offset, timedelta(hours=2))
+        self.assertEqual(auto.last_bar_time("EURUSD"), paper.last_bar_time("EURUSD"))
+        pd.testing.assert_index_equal(auto.bars("EURUSD", 50).index, paper.bars("EURUSD", 50).index, check_names=False)
+        e = Engine(auto, cfg(), log=lambda *_: None)
+        e.step()
+        self.assertEqual(len(paper.positions()), 1)
+
+    def test_deposit_whose_record_lags_through_the_adapter(self):
+        paper, sim, e, logs = self.setup({"deal_lag_calls": 6})
+        clock = [sim.wall_now()]
+        sim.wall_now = lambda: clock[0]
+        e.broker._clock = lambda: clock[0]
+        e.dry_run = True
+        e.step()
+        clock[0] += timedelta(seconds=5)
+        paper._flows.append((clock[0], 4_000.0))                                     # özkaynak hemen, kayıt 6 sorgu sonra
+        paper.balance += 4_000.0
+        for _ in range(12):
+            e.step()
+            clock[0] += timedelta(seconds=5)
+        eq = paper.account().equity
+        self.assertAlmostEqual(e.drawdown(eq), 0.0, places=6)
+        self.assertEqual(e.risk_factor(eq), 1.0)
+        self.assertEqual(sum("AKIŞ" in x for x in logs), 1)
 
 
 class Plan(unittest.TestCase):
