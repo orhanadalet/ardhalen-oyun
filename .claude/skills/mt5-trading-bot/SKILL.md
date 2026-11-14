@@ -93,13 +93,15 @@ trading/
   - Kural değişikliğinde `tests/test_fitil.py` çalıştırılır; para ve emirle ilgili her davranışın testi olmalı.
   - `mt5_broker.py` gerçek terminalde çalıştırılmadı; kullanıcı ilk çalıştırmada hata bildirirse
     önce orayı şüpheli say.
-  - Kanıt durumu (gerçek EURUSD verisi, kurallar veriye göre ayarlanmadan):
-    geri çekilme M15 2019-20: +0,14R (197 işlem, z=1,3); saatlik 2019-20: +0,16R; saatlik 2017: -0,10R.
-    Süpürme hiçbir dönemde kazandırmadı ve varsayılan olarak kapalı. Yani umut verici ama kanıtlanmamış;
-    stratejiyi "çalışıyor" diye sunma. Yeni kural önerirken önce `fitil.backtest --wf` ile örnek dışı
-    sonuç al; eğitim dönemi sonucu kanıt değildir. Ayrıntı `bot/README.md` içinde.
-  - Gerçek örnek veri: `python bot/tools/fetch_sample_data.py` (EURUSD M1 2019-20, H1 2017). Başka
-    parite, altın ve petrol için gün içi veri hâlâ kullanıcıdan gelmeli.
+  - Kanıt durumu (gerçek veri, kurallar veriye göre ayarlanmadan), geri çekilme kurulumu:
+    EURUSD M15 2019-20: +0,14R (197 işlem); EURUSD saatlik 2017: -0,10R (146 işlem);
+    vadeli altın M15 NY seansı 2020-22: -0,06R (168 işlem, maliyetsiz +0,03R); spot altın ve petrol
+    örnekleri çok küçük. Süpürme hiçbir dönemde kazandırmadı ve varsayılan olarak kapalı.
+    Sonuç: güvenilir avantaj gösterilemedi; stratejiyi "çalışıyor" diye sunma. Yeni kural önerirken önce
+    `fitil.backtest --wf` ile örnek dışı sonuç al. Ayrıntı `bot/README.md` içinde.
+  - Gerçek örnek veri: `python bot/tools/fetch_sample_data.py` (EURUSD M1 2019-20 ve H1 2017; altın M5
+    2021; vadeli altın M5 2020-22 ve ham petrol M1 2021, ikisi yalnız NY seansı). Diğer pariteler için
+    gün içi veri hâlâ kullanıcıdan gelmeli.
   - Bu ortamda paket indirmek gerekirse pip'i ortam proxy'sinden geçir (`NO_PROXY= no_proxy= pip ...`).
     Paket kodunu çalıştırma; yalnızca veri dosyalarını aç. `tick-backtest` paketindeki tick verisi sentetiktir.
   - MT5 terminali bu ortamda çalıştırılamaz (Wine yok, apt ve MetaQuotes sunucuları ağ politikasıyla kapalı).

@@ -11,9 +11,10 @@ her M15 çubuğu kapanışında tarama yapar.
   sona çalışıyor ve doğrudan simülasyonla işlem işlem aynı sonucu veriyor (sunucu saati, yaz saati
   geçişi, stop taşıma, gün sonu kapanışı dahil). Kullanılan tüm sabitler, fonksiyonlar, alan ve istek adları resmi
   `MetaTrader5` paketinin (5.0.6231) kaynağıyla karşılaştırıldı ve eşleşti.
-- **Strateji kanıtı karışık, henüz yeterli değil.** Gerçek EURUSD verisinde geri çekilme kurulumu
-  2019-20 döneminde M15'te maliyet sonrası +0,14R (197 işlem), 2017'de saatlikte -0,10R (146 işlem) verdi.
-  Süpürme (fitil) kurulumu iki dönemde de kazandırmadı ve varsayılan olarak kapatıldı.
+- **Strateji kanıtı karışık ve yetersiz.** Geri çekilme kurulumu gerçek EURUSD verisinde 2019-20'de
+  M15'te maliyet sonrası +0,14R (197 işlem), 2017'de saatlikte -0,10R (146 işlem); vadeli altında
+  2020-22'de -0,06R (168 işlem) verdi. Süpürme (fitil) kurulumu hiçbir dönemde kazandırmadı ve
+  varsayılan olarak kapatıldı.
   Ayrıntı aşağıda "Gerçek veri sonucu" bölümünde. Demo hesapta izlemeden gerçek para kullanmayın.
 
 ## Ne yapar
@@ -106,7 +107,7 @@ değilse sonuç şanstan ayırt edilemez.
 
 ## Gerçek veri sonucu
 
-Veri: açık kaynak paketlerin içinde dağıtılan gerçek EURUSD verisi (Dukascopy kaynaklı).
+Veri: açık kaynak paketlerin içinde dağıtılan gerçek EURUSD, altın ve ham petrol verisi.
 `python tools/fetch_sample_data.py` ile aynı dosyaları indirip sonuçları yeniden üretebilirsiniz.
 
 | Dönem ve zaman dilimi | Kurulum | İşlem | Kazanma | Ortalama R (std. hata) | Getiri |
@@ -147,15 +148,27 @@ Dört zaman diliminin hepsinde işaret pozitif. Sonuç maliyete duyarlı: spread
 10 spread" kuralı işlemlerin çoğunu eler ve kalan avantaj küçülür; 3 pipte kaybolur. Bu sistem ancak
 düşük spread'li (EURUSD'de yaklaşık 1 pip ve altı) bir hesapta anlamlıdır.
 
+Altın ve petrol (aynı kurallar, parametre değişmeden, varsayılan maliyetlerle):
+
+| Veri | İşlem | Kazanma | Ortalama R (std. hata) | Getiri | Maliyetsiz ortalama R |
+|---|---|---|---|---|---|
+| Altın XAUUSD M15, tam seans, Ekim - Aralık 2021 | 43 | %32,6 | +0,121 (0,268) | +%0,9 | +0,418 |
+| Vadeli altın GC M15, yalnız New York seansı, 2020 - Şubat 2022 | 168 | %44,0 | -0,063 (0,059) | -%8,8 | +0,029 |
+| Ham petrol CL M15, yalnız New York seansı, Ekim - Aralık 2021 | 8 | %25,0 | -0,230 (0,274) | -%1,9 | -0,176 |
+
+Vadeli altın en büyük bağımsız örnek ve sonucu net: maliyet öncesi sıfır, maliyet sonrası hafif eksi.
+Kısıtı, verinin yalnızca New York seansını içermesi (bot Londra ve New York'u birlikte kullanmak üzere
+tasarlandı) ve vadeli fiyat olması. Spot altın ve petrol örnekleri hüküm vermek için çok küçük.
+
 Okuma:
 
 - **Süpürme kurulumu** hiçbir dönemde kazandırmadı. 2017 verisinde sinyalden sonraki 4-12 saatte fiyat
   ortalamada sinyalin tersine gitti. Bu yüzden varsayılan olarak kapalı; açmak için config'e
   `"strategy": {"setups": ["sweep", "pullback"]}` yazılır.
-- **Geri çekilme kurulumu** döneme bağlı: 2019-20'de kazandırdı, 2017'de kaybettirdi. İki dönem
-  birleştirildiğinde saatlik çubukta ortalama sıfıra yakın. Umut verici ama güvenilir bir avantaj
-  olduğu gösterilmiş değil.
-- Eksik olan: başka pariteler, altın, petrol ve daha uzun dönem. Bunlar için M15 verisi gerekiyor.
+- **Geri çekilme kurulumu** döneme ve enstrümana bağlı: EURUSD'de 2019-20'de kazandırdı, 2017'de
+  kaybettirdi; vadeli altında 2020-22'de kazandırmadı. Güvenilir bir avantaj olduğu gösterilmiş değil;
+  eldeki tek olumlu sonuç EURUSD'nin bir dönemi.
+- Eksik olan: diğer majör pariteler, tam seans altın ve petrolün daha uzun dönemleri.
 
 Bu istatistikler gerçek olsaydı ne anlama gelirdi (`fitil.plan` ile, 2019-20 M15 değerleri: kazanma
 %44, ortalama kazanç 1,33R, ortalama kayıp 0,80R, enstrüman başına günde 0,7 işlem):

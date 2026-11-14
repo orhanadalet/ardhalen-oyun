@@ -5,7 +5,7 @@ yalnızca bu klasörde yaşar. İki ayrı sistem içerir:
 
 | Sistem | Yer | Durum |
 |---|---|---|
-| **Fitil**: M15 gün içi Python botu | `bot/` (bkz. `bot/README.md`) | Altyapı test edildi ve incelendi. MT5 bağlantısı gerçek terminalde çalıştırılmadı. Gerçek EURUSD verisinde geri çekilme kurulumu 2019-20'de kazandırdı, 2017'de kaybettirdi; kanıt henüz yeterli değil. |
+| **Fitil**: M15 gün içi Python botu | `bot/` (bkz. `bot/README.md`) | Altyapı test edildi ve incelendi. MT5 bağlantısı gerçek terminalde çalıştırılmadı. Gerçek veride geri çekilme kurulumu yalnızca EURUSD 2019-20'de kazandırdı; EURUSD 2017'de ve vadeli altında kazandırmadı. Kanıt yetersiz. |
 | Günlük trend portföyü | `research/fxlab/`, `mql5/` | Gerçek günlük veride maliyet sonrası kâr etmedi (aşağıda). Canlıya alınmaz. |
 
 Testler: `cd trading && python -m unittest discover -s tests`
