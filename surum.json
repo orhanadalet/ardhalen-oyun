@@ -1,0 +1,162 @@
+{
+ "surum": "3.5",
+ "tarih": "2026-11-12",
+ "notlar": [
+  "Tek kahraman: sınıf, ırk, köken ve İttifak seçimi kalktı. Kahramanın Kül Vadisi'nde uyanır; yalnız görünüşünü ve adını seçersin. Hikâye tek yoldan akar: Kül Vadisi, Yeşilvadi ve ejder; sonra Kuzey, Kuzgunkale ve Yarık.",
+  "Üç yol: Kılıç baştan seninle, Yay'ı Urgan, Ruh'u Runa öğretir. Dövüşte 6, 7 ve 8 tuşlarıyla ya da dokunmatikteki yol düğmesiyle geçersin. Her yol kendi silahını ve çubuğunu hatırlar; zırh ve takılar ortaktır.",
+  "Eski kahramanlar korunur: sınıfı en yakın yola çevrilir, seviyesine göre öbür yollar da açılır.",
+  "Keşif yerlerinde yoldaşın konuşur; hikâyesi biten bölgeye dönünce yerin nasıl değiştiğini görürsün.",
+  "Kitap II'nin av görevleri de bir bulguyla biter.",
+  "Görev konuşmaları artık sahne: sinema şeritleri iner, kamera konuşana döner, söz satır satır akar. Dokunarak ya da Boşluk tuşuyla ilerlet, Esc ile sona atla.",
+  "Kitap kapanışı, köken girişi ve keşif anları geniş planda anlatı sahnesi olarak oynar; her bölüm kendi kartıyla açılır.",
+  "Yol gösteren ışık: ana hikâyenin sıradaki adımının yerinde uzaktan seçilen ince bir ışık durur, yaklaşınca söner.",
+  "Yoldaşın hikâyenin sesi: Runa, Kayra, Nilüfer ve Urgan her ana görevden sonra olanı kendi gözünden yorumlar.",
+  "Hikâye seni taşır: sıradaki ana görev için seviyen yetmiyorsa o seviyeye yükselirsin; canavar kesmek zorunda kalmazsın.",
+  "Sade ekran: savaş dışında çubuklar ve can çerçevesi söner, ekranda dünya kalır. Ayarlar'dan kapatılabilir.",
+  "Sohbet satırı, mikrofon, başka oyuncu gibi dolaşan maceracılar ve savaş meydanı düğmesi kalktı.",
+  "Ana hikâyedeki av görevleri kısaldı: istenen sayı düştü, görev ödülü arttı.",
+  "Av bir bulguyla biter: Kitap I'in av ve toplama görevlerinde son hedef düşünce kısa bir anlatı sahnesi açılır.",
+  "Yol arkadaşın kilit anlarda sana soru sorar; cevabını sen seçersin, o da ona göre karşılık verir.",
+  "Boşa giden ağır darbeden sonra düşman kısa süre açık kalır ve daha çok hasar alır.",
+  "Kıl payı: yuvarlanarak bir darbeyi boşa çıkarırsan zaman bir an yavaşlar, dört saniye daha sert vurursun.",
+  "On kadim kapısının her biri kendi ışığında; Kitap II ve III'te yoldaş sözleri ve keşif anlatıları tamam.",
+  "Tek işi olan kişiyle konuşunca pencere açılmaz, sahne başlar; sahnede ad levhaları ve can çubukları söner.",
+  "Ateşlerin üstündeki kara moloz yığınları gitti, yerine taş halkalı ocaklar geldi; kamera kahramanı her duruşta gösterir.",
+  "Yeni dövüş: kahraman boynuzlu bir Ölümsüz, kamera omzunun arkasında yakından izler. Her yolda dört yetenek ve vurdukça dolan Kül Öfkesi var; öfke dolunca kahraman bir süre daha sert vurur, daha az hasar alır.",
+  "Kalkan: Z basılı tutulunca önden gelen vuruşun çoğu kesilir. Vuruştan hemen önce basarsan savuşturursun, düşman sersemler.",
+  "Dövüşte yol değiştirmek bir hamledir: Kılıç atılır, Yay geri sıçrar, Ruh can verir.",
+  "Kılıç ve balta önündeki birkaç düşmana birden işler; kamera dövüşte hedefi kadrajda tutar.",
+  "Can taşı: düşen düşmandan bazen yeşil ışıyan bir taş kalır, üstünden geçince canın dolar.",
+  "Yoldaşa emir: F ile yoldaşın hedefe güçlü bir atış yapar, düşman sendeler.",
+  "Hikâyesi biten bölgede bir anma taşı durur; Urgan yolundan ayrılınca yerini Runa alır.",
+  "Ayazdağ ve Buzkıyı kar yağmasa da ak örtüyle durur."
+ ],
+ "haberler": [
+  {
+   "tarih": "12 Kasım 2026",
+   "baslik": "Ardhalen 3.5",
+   "metin": "Tek kahraman, yeni dövüş: boynuzlu Ölümsüz omuz arkası kamerayla savaşır. Her yolda dört yetenek, vurdukça dolan Kül Öfkesi, zamanında basılınca savuşturan kalkan, düşenden kalan can taşları ve yoldaşa emir. Görev konuşmaları artık sahne. Başlatıcı GÜNCELLE der, yalnız değişen dosyalar iner."
+  },
+  {
+   "tarih": "10 Kasım 2026",
+   "baslik": "Ardhalen 3.4",
+   "metin": "Ardhalen artık tek başına oynanan bir hikâye oyunu. Her İttifakın Kitap I zinciri baştan sona izlenir; Runa, Kayra, Nilüfer ve Urgan yanına katılır. Oyun İngilizce de oynanır, Görsel Tarz ayarı geldi, telefonda akıcılık arttı. Başlatıcı GÜNCELLE der, yalnız değişen dosyalar iner."
+  },
+  {
+   "tarih": "4 Kasım 2026",
+   "baslik": "Ardhalen 3.3",
+   "metin": "Kitaplarla tam uyum: ejderler ve vezir öldürülmez, yurduna çekilir; Gölge Lordu ve Yüzüksüz Kral sonrası kasabalarda kitap sonrası durum; Buzkıyı, oba ve Kuzgunkale'de yeni kişiler, oyunun ilk çocuğu Birkir; kaptanlar kitaptaki adlarıyla; ölümsüzlere Kemik Düzlüğü'nde kendi taşı. Başlatıcı GÜNCELLE der."
+  },
+  {
+   "tarih": "4 Kasım 2026",
+   "baslik": "Ardhalen 3.2",
+   "metin": "Açılış sineması yeniden: Küllerin Altında Bir Ses. Patron sahneleri ve ağır çekim, yeni müzikler, her sınıfa büyü simgeleri, İttifakına göre selam veren köylüler, başkent meydanları, haydut pususu ve korsan baskını, gizli mağaralar; savaştaki takılmalar kalktı. Başlatıcı GÜNCELLE der, yalnız değişen dosyalar iner."
+  },
+  {
+   "tarih": "2 Kasım 2026",
+   "baslik": "Ardhalen 3.1",
+   "metin": "Oyun kahraman seçimiyle açılıyor, alan büyüleri sinema gibi, ek yetenek çubuğu hazır, gerçekçi at ve binekçide iniş, süresiz Tulpar, nadir ganimet, gemiye her an biniş. Başlatıcı GÜNCELLE der, yalnız değişen dosyalar iner."
+  },
+  {
+   "tarih": "1 Kasım 2026",
+   "baslik": "Ardhalen 3.0",
+   "metin": "Sinema gibi büyüler, açık deniz limanları ve kendin bindiğin gemiler, haritalar arası kesintisiz geçiş, dalış, evcilleştirilen yoldaş ve bağ, eşyaya göre giyinen kahramanlar, her sınıfa yeni büyüler ve doruk sınavları. Başlatıcı GÜNCELLE der, yalnız değişen dosyalar iner."
+  },
+  {
+   "tarih": "28 Ekim 2026",
+   "baslik": "Ardhalen Başlatıcı yayında",
+   "metin": "Oyunu artık başlatıcıyla kuruyorsun; her yeni sürümde başlatıcı GÜNCELLE der ve yalnız değişen dosyaları indirir."
+  }
+ ],
+ "sunucu": "",
+ "baslatici": {
+  "surum": "1.0",
+  "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/latest/download/ArdhalenBaslatici.exe"
+ },
+ "dosyalar": [
+  {
+   "yol": "Ardhalen.exe",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.5/Ardhalen.exe",
+   "sha256": "66b26ad96df7458ea917b632a73ac7c88bb058db24dbd11a457fd50435ab7b13",
+   "boyut": 84214784
+  },
+  {
+   "yol": "Ardhalen.pck",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.5/Ardhalen.pck",
+   "sha256": "cf6492004db8e03747e2d4e21cfc21a69e16248cd805935e72bb8cbf18ac82f2",
+   "boyut": 1059980960
+  },
+  {
+   "yol": "DENEME_LISTESI_2.8.txt",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.5/DENEME_LISTESI_2.8.txt",
+   "sha256": "e4c2a24c539f519a477f1a2d2cc6ea0af690c0d3f1935ff07e233c11298b3c37",
+   "boyut": 5328
+  },
+  {
+   "yol": "GIZLILIK_POLITIKASI.md",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.5/GIZLILIK_POLITIKASI.md",
+   "sha256": "b25ed4cd9d0e94446b4ca0a66316463777b779058bb55bd1b19602d072f71973",
+   "boyut": 2169
+  },
+  {
+   "yol": "KULLANIM_SOZLESMESI.txt",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.5/KULLANIM_SOZLESMESI.txt",
+   "sha256": "cd14a29ce70b08f42fcfb2722e57d502baded806c1ce9c3c80937663ff6000fe",
+   "boyut": 2615
+  },
+  {
+   "yol": "OKU BENI.txt",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.5/OKU_BENI.txt",
+   "sha256": "957f79a0f041a956423d9218d22faf012485fe893f4d1319e4ba0e4c611a1975",
+   "boyut": 17764
+  },
+  {
+   "yol": "Sorun Giderme.bat",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.5/Sorun_Giderme.bat",
+   "sha256": "4be3d5ef0c1745958eb5a678348340badae9ccba7b5ce7a432b0753036ee7cfe",
+   "boyut": 355
+  },
+  {
+   "yol": "TESTCI_NOTU.txt",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.5/TESTCI_NOTU.txt",
+   "sha256": "5c3446d6c60ff2e4cd89969ee217ab8aee623a3c604ea144b8e6539f24f89229",
+   "boyut": 3513
+  },
+  {
+   "yol": "Uyumlu Mod.bat",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.5/Uyumlu_Mod.bat",
+   "sha256": "9bf8c671c0e7ff5e9d36e70820d6e3740ca4ad7eb4ce0c9297f1bb50808fa933",
+   "boyut": 78
+  },
+  {
+   "yol": "icon.ico",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.5/icon.ico",
+   "sha256": "44dd5ac568784fd8f5787fb5abd8378640bea30db48d37fe8bb145a98eb3e14b",
+   "boyut": 15318
+  },
+  {
+   "yol": "licenses/Godot_MIT.txt",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.5/licenses__Godot_MIT.txt",
+   "sha256": "e9a96373ee89b7538126a8de83e8e0d476ef0d0a9f83d676ec1daa5b967c6991",
+   "boyut": 1319
+  },
+  {
+   "yol": "licenses/MakeHuman_CC0.txt",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.5/licenses__MakeHuman_CC0.txt",
+   "sha256": "a629bada50e3baa3ac50b648ebfc4f1075c0517654dee5b2fbc71088fa230079",
+   "boyut": 509
+  },
+  {
+   "yol": "licenses/Mixamo_ve_PolyHaven.txt",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.5/licenses__Mixamo_ve_PolyHaven.txt",
+   "sha256": "d72c82ea4ecc1bfbabd66414ecd5b003621fc90f2a880952f1601640f2cf95a8",
+   "boyut": 1010
+  },
+  {
+   "yol": "licenses/Varliklar.txt",
+   "url": "https://github.com/orhanadalet/ardhalen-oyun/releases/download/v3.5/licenses__Varliklar.txt",
+   "sha256": "a75ee01e58353e0db264c181514d5eb9ffbe5c7d368517c8b17d64524aeaac5c",
+   "boyut": 6869
+  }
+ ]
+}
