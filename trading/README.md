@@ -5,7 +5,7 @@ yalnızca bu klasörde yaşar. İki ayrı sistem içerir:
 
 | Sistem | Yer | Durum |
 |---|---|---|
-| **Fitil**: M15 gün içi Python botu | `bot/` (bkz. `bot/README.md`) | Asıl hedef. Mantığı simüle brokerla test edildi; MT5 bağlantısı ve strateji gerçek veride sınanmadı. |
+| **Fitil**: M15 gün içi Python botu | `bot/` (bkz. `bot/README.md`) | Altyapı test edildi ve incelendi. MT5 bağlantısı gerçek terminalde çalıştırılmadı. Strateji eldeki tek gerçek gün içi veride kârlı çıkmadı. |
 | Günlük trend portföyü | `research/fxlab/`, `mql5/` | Gerçek günlük veride maliyet sonrası kâr etmedi (aşağıda). Canlıya alınmaz. |
 
 Testler: `cd trading && python -m unittest discover -s tests`

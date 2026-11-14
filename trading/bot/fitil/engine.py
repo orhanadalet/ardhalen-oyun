@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 
 from . import events
-from .broker import BAR, Broker, FatalError, Pos, round_lots_down
+from .broker import Broker, FatalError, Pos, round_lots_down
 from .config import Config
 from .strategy import Signal, atr, evaluate
 
@@ -31,7 +31,8 @@ class Engine:
                       "flows_until": "", "withdraw_base": 0.0, "withdraw_week": "",
                       # adj: para akışlarından arındırma çarpanı. "Ayarlı özkaynak" = özkaynak * adj; yalnızca
                       # işlem kâr/zararıyla değişir. peak_equity ve day_start_equity ayarlı birimdedir.
-                      "adj": 1.0, "peak_time": "", "day_start_time": ""}
+                      "adj": 1.0, "peak_time": "", "day_start_time": "",
+                      "peak_log": []}       # son zirve yükselişleri: [zaman, yükselişten önceki zirve]
         self._warned: set[str] = set()
         if self.state_path and self.state_path.exists():
             try:
@@ -44,6 +45,7 @@ class Engine:
         for x in cfg.blackouts:
             t = datetime.fromisoformat(x)
             self._blackouts.append(t.astimezone(timezone.utc).replace(tzinfo=None) if t.tzinfo else t)
+        self.bar = timedelta(minutes=cfg.strategy.bar_minutes)
         self._flow_pending = False        # yeni akış görüldü; özkaynağın onu yansıttığından emin olmak için bir tur beklenir
         self._flow_error_at: datetime | None = None
         self._last_block: dict[str, str | None] = {}
@@ -84,6 +86,10 @@ class Engine:
             self.state.update(day=day, day_start_equity=adj_eq, day_start_time=now.isoformat(), trades_today=0)
             changed = True
         if adj_eq > self.state["peak_equity"]:
+            log = self.state["peak_log"]
+            log.append([now.isoformat(), self.state["peak_equity"]])
+            cutoff = (now - timedelta(hours=24)).isoformat()
+            self.state["peak_log"] = [x for x in log if x[0] >= cutoff][-200:]
             self.state.update(peak_equity=adj_eq, peak_time=now.isoformat())
             changed = True
         if self.state["withdraw_base"] <= 0:
@@ -131,11 +137,18 @@ class Engine:
         if equity > 0 and equity - flow > 0:
             k = (equity - flow) / equity
             self.state["adj"] *= k
-            pt, dt = self.state["peak_time"], self.state["day_start_time"]
-            # Hayali sıçrama düzeltmesi. Zirve yalnızca aşağı düzeltilir (para yatırma): yanlışlıkla
-            # düşürülürse hemen kendini toparlar, yanlışlıkla yükseltilirse bot durur.
-            if k < 1 and pt and datetime.fromisoformat(pt) >= first - timedelta(seconds=30):   # 30 sn: saat farkı payı
-                self.state["peak_equity"] *= k
+            dt = self.state["day_start_time"]
+            # Hayali sıçrama düzeltmesi (yalnızca para yatırmada, zirve yalnızca aşağı): akış kaydı geç
+            # göründüyse arada zirve hayali özkaynakla yükselmiş olabilir. Akış anından (30 sn saat farkı
+            # payıyla) sonraki yükselişler geri alınır: zirve, o yükselişlerden ÖNCEKİ değerin ve düzeltilmiş
+            # değerin büyüğüne çekilir. Böylece akıştan önce var olan gerçek düşüş silinmez.
+            if k < 1:
+                edge = (first - timedelta(seconds=30)).isoformat()
+                later = [x for x in self.state["peak_log"] if x[0] >= edge]
+                if later:
+                    self.state["peak_equity"] = max(later[0][1], self.state["peak_equity"] * k)
+                    self.state["peak_time"] = now.isoformat()
+                    self.state["peak_log"] = [x for x in self.state["peak_log"] if x[0] < edge]
             if dt and datetime.fromisoformat(dt) >= first:
                 self.state["day_start_equity"] *= k
         if flow > 0:
@@ -246,7 +259,7 @@ class Engine:
             last = b.last_bar_time(sym)
             if last is None or self.seen.get(sym) == last:
                 continue
-            closed_at = last + BAR
+            closed_at = last + self.bar
             if (now - closed_at).total_seconds() < c.settle_sec:
                 continue
             self.seen[sym] = last

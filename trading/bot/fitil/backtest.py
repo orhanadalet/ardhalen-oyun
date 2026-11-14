@@ -53,10 +53,14 @@ def sim_settings(symbol: str, entry: dict) -> dict:
     return out
 
 
-def load_m15(path: str | Path, tz_shift_hours: float = 0.0) -> pd.DataFrame:
+def load_m15(path: str | Path, tz_shift_hours: float = 0.0, minutes: int = 15) -> pd.DataFrame:
+    """Çubuk dosyasını okur ve `minutes` dakikalık çubuklara getirir (daha sık veri toplanır)."""
     path = Path(path)
     first = path.read_text(encoding="utf-8", errors="ignore")[:200].splitlines()[0]
-    if "<" in first or "date" in first.lower():
+    if first.startswith(",") or first.lower().startswith(("time,", "datetime,")):     # pandas biçimi: ilk sütun zaman
+        df = pd.read_csv(path, index_col=0, parse_dates=True)
+        df.columns = [c.strip().lower() for c in df.columns]
+    elif "<" in first or "date" in first.lower():
         df = pd.read_csv(path, sep=None, engine="python")
         df.columns = [c.strip().strip("<>").lower() for c in df.columns]
         stamp = df["date"].astype(str).str.replace(".", "-", regex=False)
@@ -71,11 +75,11 @@ def load_m15(path: str | Path, tz_shift_hours: float = 0.0) -> pd.DataFrame:
     df.index.name = "time"
     df = df[~df.index.duplicated(keep="last")].sort_index()
     step = df.index.to_series().diff().dt.total_seconds().median()
-    if step < 900:                                      # M1/M5 -> M15
-        df = df.resample("15min", label="left", closed="left").agg(
+    if step < minutes * 60:                             # daha sık veri: hedef zaman dilimine topla
+        df = df.resample(f"{minutes}min", label="left", closed="left").agg(
             {"open": "first", "high": "max", "low": "min", "close": "last"}).dropna()
-    elif step > 900:
-        raise ValueError(f"{path}: veri M15'ten seyrek (ortanca aralık {step:.0f} sn)")
+    elif step > minutes * 60:
+        raise ValueError(f"{path}: veri {minutes} dakikadan seyrek (ortanca aralık {step:.0f} sn)")
     if (df[COLS] <= 0).any().any() or (df["high"] < df["low"]).any():
         raise ValueError(f"{path}: bozuk fiyat satırları var")
     return df
@@ -94,7 +98,8 @@ def run(data: dict[str, pd.DataFrame], cfg: Config, equity: float = 10_000.0, st
     broker = PaperBroker(data, specs, {s: v["contract"] for s, v in sim.items()},
                          {s: v["usd_side"] for s, v in sim.items()}, {s: v["spread"] for s, v in sim.items()},
                          equity=equity, commission_per_lot=commission_per_lot,
-                         slippage={s: v["slippage"] for s, v in sim.items()}, start=start)
+                         slippage={s: v["slippage"] for s, v in sim.items()}, start=start,
+                         bar=pd.Timedelta(minutes=cfg.strategy.bar_minutes).to_pytimedelta())
     engine = Engine(broker, cfg, log=log)
     days, values = [], []
     while True:
@@ -154,6 +159,51 @@ def report(trades: pd.DataFrame, equity: pd.Series) -> str:
     return "\n".join(out)
 
 
+def _score(trades: pd.DataFrame, min_trades: int) -> float:
+    """Parametre seçimi için ölçüt: ortalama R (yeterli işlem yoksa -sonsuz)."""
+    if len(trades) < min_trades:
+        return float("-inf")
+    return float(trades["r"].mean())
+
+
+def walk_forward(data: dict[str, pd.DataFrame], cfg: Config, grid: dict[str, list], train_days: int = 120,
+                 test_days: int = 30, min_trades: int = 30, equity: float = 10_000.0):
+    """Strateji parametrelerini geçmiş pencerede seçer, HİÇ GÖRÜLMEMİŞ sonraki pencerede sınar.
+
+    grid: StrategyParams alan adı -> denenecek değerler. Dönüş: (dilim tablosu, tüm örnek dışı işlemler).
+    Yalnızca örnek dışı (test) sonuçlar stratejinin kanıtı sayılır; eğitim sonuçları iyimserdir.
+    """
+    from itertools import product
+    keys = list(grid)
+    combos = [dict(zip(keys, v)) for v in product(*[grid[k] for k in keys])]
+    first = max(d.index[min(len(d) - 1, cfg.strategy.min_bars)] for d in data.values())
+    last = min(d.index[-1] for d in data.values())
+    folds, oos = [], []
+    t0 = first
+    while t0 + pd.Timedelta(days=train_days + test_days) <= last:
+        tr_end = t0 + pd.Timedelta(days=train_days)
+        te_end = tr_end + pd.Timedelta(days=test_days)
+        scored = []
+        for c in combos:
+            trades, _, _ = run(data, replace(cfg, strategy=replace(cfg.strategy, **c)), equity, t0, tr_end)
+            scored.append((_score(trades, min_trades), c))
+        best_score, best = max(scored, key=lambda x: x[0])
+        chosen = best if np.isfinite(best_score) else {}
+        trades, _, _ = run(data, replace(cfg, strategy=replace(cfg.strategy, **chosen)), equity, tr_end, te_end)
+        folds.append(dict(egitim=f"{t0.date()}..{tr_end.date()}", test=f"{tr_end.date()}..{te_end.date()}",
+                          secilen=chosen, egitim_ort_R=round(best_score, 3) if np.isfinite(best_score) else None,
+                          test_islem=len(trades), test_ort_R=round(float(trades["r"].mean()), 3) if len(trades) else None))
+        if len(trades):
+            oos.append(trades)
+        t0 = t0 + pd.Timedelta(days=test_days)
+    if not folds:
+        raise ValueError("Walk-forward için veri yetersiz (eğitim + test penceresi sığmıyor)")
+    return pd.DataFrame(folds), (pd.concat(oos, ignore_index=True) if oos else pd.DataFrame())
+
+
+WF_GRID = {"setups": [("sweep", "pullback"), ("sweep",), ("pullback",)], "max_stop_atr": [2.0, 3.0]}
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(prog="fitil.backtest")
     ap.add_argument("--config", required=True)
@@ -163,19 +213,33 @@ def main() -> None:
     ap.add_argument("--equity", type=float, default=10_000.0)
     ap.add_argument("--tz-shift", type=float, default=0.0, help="verinin UTC'den farkı (saat); MT5 sunucu saati için ör. 2")
     ap.add_argument("--trades-out", help="işlem listesini CSV olarak yaz")
+    ap.add_argument("--wf", action="store_true", help="walk-forward: parametreyi geçmişte seç, görülmemiş dönemde sına")
+    ap.add_argument("--train-days", type=int, default=120)
+    ap.add_argument("--test-days", type=int, default=30)
     a = ap.parse_args()
     cfg = Config.load(a.config)
     data = {}
     for s in cfg.symbols:
         p = Path(a.data) / f"{s}.csv"
         if p.exists():
-            data[s] = load_m15(p, a.tz_shift)
+            data[s] = load_m15(p, a.tz_shift, cfg.strategy.bar_minutes)
             print(f"{s}: {len(data[s])} çubuk, {data[s].index[0]} -> {data[s].index[-1]}")
         else:
             print(f"{s}: {p} yok, atlandı")
     if not data:
         raise SystemExit("Hiç veri dosyası bulunamadı")
     cfg = replace(cfg, symbols={s: cfg.symbols[s] for s in data})
+    if a.wf:
+        folds, oos = walk_forward(data, cfg, WF_GRID, a.train_days, a.test_days, equity=a.equity)
+        pd.set_option("display.width", 200)
+        print()
+        print(folds.to_string(index=False))
+        if len(oos):
+            se = oos["r"].std() / np.sqrt(len(oos))
+            print(f"\nÖrnek dışı toplam: {len(oos)} işlem, ortalama R {oos['r'].mean():+.3f} (standart hata {se:.3f}), "
+                  f"kazanma {100 * (oos['pnl'] > 0).mean():.1f}%")
+            print("Ortalama R, standart hatanın iki katından büyük değilse sonuç şanstan ayırt edilemez.")
+        return
     trades, equity, _ = run(data, cfg, a.equity, a.start, a.end)
     print()
     print(report(trades, equity))

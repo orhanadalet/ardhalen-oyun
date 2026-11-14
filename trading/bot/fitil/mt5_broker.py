@@ -79,11 +79,9 @@ class MT5Broker:
         return timedelta(seconds=snapped)
 
     def _utc(self, server_epoch: float) -> datetime:
-        naive = EPOCH + timedelta(seconds=float(server_epoch))
         if self._zone is None:
-            return naive - self._offset
-        local = (naive - self._plus).replace(tzinfo=self._zone)
-        return local.astimezone(timezone.utc).replace(tzinfo=None)
+            return EPOCH + timedelta(seconds=float(server_epoch)) - self._offset
+        return self._utc_index([server_epoch])[0].to_pydatetime()      # çubuklarla aynı dönüşüm
 
     def _utc_index(self, server_epochs) -> pd.DatetimeIndex:
         idx = pd.DatetimeIndex(pd.to_datetime(np.asarray(server_epochs, dtype="float64"), unit="s"))
@@ -171,7 +169,9 @@ class MT5Broker:
         return Tick(t.bid, t.ask, self._utc(t.time))
 
     def _rates(self, symbol: str, count: int):
-        return self.mt5.copy_rates_from_pos(symbol, self.mt5.TIMEFRAME_M15, 1, count)   # 1: oluşan çubuğu atla
+        minutes = self.cfg.strategy.bar_minutes
+        tf = self.mt5.TIMEFRAME_H1 if minutes == 60 else getattr(self.mt5, f"TIMEFRAME_M{minutes}")
+        return self.mt5.copy_rates_from_pos(symbol, tf, 1, count)   # 1: oluşan çubuğu atla
 
     def last_bar_time(self, symbol: str) -> datetime | None:
         r = self._rates(symbol, 1)

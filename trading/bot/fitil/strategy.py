@@ -61,19 +61,19 @@ def liquidity_levels(df: pd.DataFrame, p: StrategyParams) -> dict[str, float]:
             break
         d0 = prev.index[-1].normalize()
         pday = prev.loc[prev.index >= d0]
-        if len(pday) >= p.min_day_bars:
+        if len(pday) * p.bar_minutes >= p.min_day_hours * 60:
             levels["pdh"], levels["pdl"] = float(pday["high"].max()), float(pday["low"].min())
             break
         prev = prev.loc[prev.index < d0]
     if t.hour >= p.asia_end_hour:
         asia = df.loc[(df.index >= day) & (df.index < day + pd.Timedelta(hours=p.asia_end_hour))]
-        if len(asia) >= 8:
+        if len(asia) * p.bar_minutes >= p.min_asia_hours * 60:
             levels["asia_h"], levels["asia_l"] = float(asia["high"].max()), float(asia["low"].min())
     return levels
 
 
 def evaluate(df: pd.DataFrame, p: StrategyParams, spread: float) -> Signal | None:
-    """df: UTC indeksli, yalnızca KAPANMIŞ M15 çubukları (open/high/low/close)."""
+    """df: UTC indeksli, yalnızca KAPANMIŞ çubuklar (open/high/low/close), p.bar_minutes zaman diliminde."""
     if len(df) < max(p.min_bars, p.atr_period + 2, p.pullback_ema_slow + 5):
         return None
     o, h, l, c = (df[k].to_numpy(dtype=float) for k in ("open", "high", "low", "close"))
@@ -92,7 +92,7 @@ def evaluate(df: pd.DataFrame, p: StrategyParams, spread: float) -> Signal | Non
         return Signal(direction, float(stop), int(min(3, score)), setup, reason)
 
     # --- 1) Likidite süpürmesi ---
-    if rng >= p.sweep_min_range_atr * a:
+    if "sweep" in p.setups and rng >= p.sweep_min_range_atr * a:
         n = p.sweep_fresh_bars
         levels = liquidity_levels(df, p)
         for name in ("pdl", "asia_l"):
@@ -115,7 +115,7 @@ def evaluate(df: pd.DataFrame, p: StrategyParams, spread: float) -> Signal | Non
                     return finish(-1, h[-1] + p.stop_buffer_atr * a, score, "sweep", f"{name} süpürüldü")
 
     # --- 2) Trend geri çekilmesi ---
-    if bias != 0:
+    if "pullback" in p.setups and bias != 0:
         fast, slow = _ema(c, p.pullback_ema_fast), _ema(c, p.pullback_ema_slow)
         k, s = p.pullback_touch_bars, p.pullback_swing_bars
         if bias > 0 and fast[-1] > slow[-1] and c[-1] > o[-1] and c[-1] > h[-2] and c[-1] > fast[-1] \

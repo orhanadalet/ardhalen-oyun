@@ -3,9 +3,14 @@
 Python ile yazılmış, MetaTrader 5'e bağlanan gün içi bot. 7 major parite, altın ve petrolde
 her M15 çubuğu kapanışında tarama yapar.
 
-**Durum:** mantık simüle brokerla test edildi (bkz. `trading/tests/test_fitil.py`).
-MT5 bağlantısı gerçek bir terminalde henüz çalıştırılmadı. Strateji kuralları gerçek gün içi
-veride sınanmadı; kâr ettiğine dair kanıt yoktur. Önce `--trade` olmadan, sonra yalnızca demo hesapta.
+**Durum (Kasım 2026):**
+- Mantık simüle brokerla 92 testle ve iki bağımsız kod incelemesiyle sınandı.
+- MT5 bağlantısı gerçek terminalde çalıştırılmadı (bu yalnızca Windows'ta mümkün). Kullanılan tüm
+  sabitler, fonksiyonlar, alan ve istek adları resmi `MetaTrader5` paketinin (5.0.6231) kaynağıyla
+  karşılaştırıldı ve eşleşti.
+- **Strateji kârlı görünmüyor.** Eldeki tek gerçek gün içi veride (EURUSD saatlik, Nisan 2017 - Şubat 2018)
+  127 işlemde ortalama -0,16R verdi; ayrıntı aşağıda "Gerçek veri sonucu" bölümünde.
+  Kendi verinizde sınamadan ve demo hesapta izlemeden gerçek para kullanmayın.
 
 ## Ne yapar
 
@@ -82,6 +87,34 @@ aktarımı (M15 ya da M1) ve HistData M1 biçimi okunur. `--tz-shift`, verinin U
 MT5 sunucu saati çoğunlukla UTC+2 ya da UTC+3'tür. Rapor kuruluma, sembole, çıkış nedenine ve
 giriş saatine göre döküm verir. Simülasyon sabit spread kullanır ve çubuk içi sırayı bilemez;
 sonuçlar gerçeğe göre iyimser olabilir.
+
+Kurulumları ayrı ayrı sınamak için config'te `"strategy": {"setups": ["pullback"]}` yazılabilir.
+Zaman dilimi `"strategy": {"bar_minutes": 15}` ile seçilir (5, 15, 30 ya da 60).
+
+Parametreyi geçmişte seçip görülmemiş dönemde sınamak (walk-forward) için:
+
+```
+python -m fitil.backtest --config config.json --data ..\data --wf --train-days 120 --test-days 30
+```
+
+Yalnızca örnek dışı (test) sonuçlar kanıt sayılır. Ortalama R, standart hatasının iki katından büyük
+değilse sonuç şanstan ayırt edilemez.
+
+## Gerçek veri sonucu
+
+Bu ortamdan ulaşılabilen tek gerçek gün içi veri: EURUSD saatlik, 5.000 çubuk (Nisan 2017 - Şubat 2018).
+Aynı kurallar saatlik çubukta çalıştırıldı (`bar_minutes: 60`):
+
+| Senaryo | İşlem | Kazanma | Ortalama R (standart hata) | Getiri |
+|---|---|---|---|---|
+| Varsayılan maliyet | 127 | %26,8 | -0,160 (0,115) | -%9,3 |
+| Maliyetsiz | 131 | %31,3 | -0,045 (0,121) | -%7,1 |
+| Yalnız süpürme | 50 | %20,0 | -0,351 (0,202) | |
+| Yalnız geri çekilme | 100 | %31,0 | -0,062 (0,119) | |
+
+Okuma: örneklem küçük (tek parite, on ay, saatlik çubuk; hedef M15 ve dokuz enstrüman), bu yüzden
+kesin hüküm değil. Ama strateji lehine hiçbir kanıt yok ve süpürme kurulumu bu veride belirgin
+biçimde kötü. Walk-forward'da eğitimde iyi görünen ayarlar test döneminde tutmadı (12 işlem, -0,24R).
 
 ## Beklenti hesabı
 

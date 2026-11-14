@@ -8,7 +8,7 @@ from typing import Protocol
 
 import pandas as pd
 
-BAR = timedelta(minutes=15)
+BAR = timedelta(minutes=15)          # varsayılan; gerçek değer config.strategy.bar_minutes'ten gelir
 
 
 @dataclass(frozen=True)
@@ -100,7 +100,8 @@ class PaperBroker:
     def __init__(self, data: dict[str, pd.DataFrame], specs: dict[str, Spec], contract: dict[str, float],
                  usd_side: dict[str, str], spread: dict[str, float], equity: float = 10_000.0,
                  commission_per_lot: float = 7.0, slippage: dict[str, float] | None = None,
-                 start: datetime | None = None):
+                 start: datetime | None = None, bar: timedelta = BAR):
+        self.bar = bar
         self.data, self.specs, self.contract, self.usd_side, self.spread = data, specs, contract, usd_side, spread
         self.commission, self.slippage = commission_per_lot, slippage or {}
         self.balance = equity
@@ -137,9 +138,9 @@ class PaperBroker:
             for p in [p for p in self._pos.values() if p.symbol == s]:
                 slip = self.slippage.get(s, 0.0)
                 if p.direction > 0 and b["low"] <= p.sl:
-                    self._settle(p, min(p.sl, b["open"]) - slip, t + BAR, "stop")
+                    self._settle(p, min(p.sl, b["open"]) - slip, t + self.bar, "stop")
                 elif p.direction < 0 and b["high"] + self.spread[s] >= p.sl:
-                    self._settle(p, max(p.sl, b["open"] + self.spread[s]) + slip, t + BAR, "stop")
+                    self._settle(p, max(p.sl, b["open"] + self.spread[s]) + slip, t + self.bar, "stop")
             self._last[s] = float(b["close"])
         if self._i + 1 >= len(self.timeline):
             return False

@@ -642,6 +642,35 @@ class ReviewFixes(unittest.TestCase):
         scans(4)
         self.assertAlmostEqual(e.drawdown(b.account().equity), 0.125, delta=0.001)
 
+    def test_random_flows_and_pnl_match_ground_truth_drawdown(self):
+        # Rastgele kâr/zarar ve para akışları; akış kaydı özkaynaktan önce, aynı anda ya da sonra görünebilir.
+        # Motorun düşüşü, yalnızca işlem sonuçlarından hesaplanan gerçek düşüşle aynı olmalı.
+        for seed in range(25):
+            rng = np.random.default_rng(seed)
+            self.logs.clear()
+            b, e, clock, scans = self._clocked()
+            perf, peak = 1.0, 1.0
+            for _ in range(12):
+                clock[0] += timedelta(minutes=30)
+                if rng.random() < 0.5:                       # işlem sonucu
+                    r = float(rng.uniform(-0.04, 0.05))
+                    b.balance *= 1.0 + r
+                    perf *= 1.0 + r
+                    scans(3)
+                    peak = max(peak, perf)
+                else:                                        # para akışı
+                    amount = float(rng.uniform(-0.5, 1.5)) * b.balance
+                    lag = int(rng.integers(-1, 30))          # -1: kayıt önce görünür; >0: geç görünür
+                    t = clock[0] + timedelta(seconds=1)
+                    if lag < 0:
+                        b._flows.append((t, amount)); scans(1); b.balance += amount
+                    else:
+                        b.balance += amount; scans(lag); b._flows.append((t, amount))
+                    scans(4)
+                truth = 1.0 - perf / peak
+                self.assertAlmostEqual(e.drawdown(b.account().equity), truth, places=6, msg=f"tohum={seed}")
+            self.assertAlmostEqual(e._adj(b.account().equity) / 10_000.0, perf, places=6, msg=f"tohum={seed}")
+
     def test_flow_history_failure_does_not_stop_day_end_close(self):
         b = at_end(self.df)
         b.market_order("EURUSD", 1, 0.1, 1.0, "t")
@@ -812,6 +841,92 @@ class ReviewFixes(unittest.TestCase):
         b.market_order("EURUSD", 1, 0.1, 1.0, "t")
         p = b.positions()[0]
         self.assertAlmostEqual(b.close(p).price, b.tick("EURUSD").bid - 0.0001)
+
+
+class Timeframes(unittest.TestCase):
+    def h1(self, n=1400, seed=9):
+        rng = np.random.default_rng(seed)
+        idx = pd.date_range("2024-01-01", periods=n, freq="1h")
+        idx = idx[idx.weekday < 5]
+        c = 1.10 * np.exp(np.cumsum(rng.standard_t(4, len(idx)) * 0.0008))
+        o = np.concatenate([[1.10], c[:-1]])
+        w = np.abs(rng.normal(0, 0.0006, (2, len(idx))))
+        return pd.DataFrame({"open": o, "high": np.maximum(o, c) + w[0], "low": np.minimum(o, c) - w[1], "close": c}, index=idx)
+
+    def conf(self, **sp):
+        c = Config(symbols={"EURUSD": {"usd_beta": -1}}, strategy=StrategyParams(bar_minutes=60, min_bars=300, **sp))
+        c.validate()
+        return c
+
+    def test_hourly_bars_run_end_to_end_and_respect_day_rules(self):
+        trades, equity, _ = bt.run({"EURUSD": self.h1()}, self.conf(), 10_000.0)
+        self.assertGreater(len(trades), 3)
+        self.assertAlmostEqual(equity.iloc[-1], 10_000.0 + trades.pnl.sum(), places=4)
+        opened, closed = pd.to_datetime(trades.open_time), pd.to_datetime(trades.close_time)
+        self.assertTrue((opened.dt.normalize() == closed.dt.normalize()).all())
+        self.assertTrue(opened.dt.hour.between(7, 16).all())
+        self.assertTrue((opened.dt.minute == 0).all())            # saatlik çubuk kapanışlarında giriş
+
+    def test_previous_day_and_asia_levels_scale_with_timeframe(self):
+        df = self.h1(200)
+        lv = liquidity_levels(df.loc[:"2024-01-04 09:00"], StrategyParams(bar_minutes=60))
+        day = df.loc["2024-01-03"]
+        asia = df.loc["2024-01-04 00:00":"2024-01-04 06:59"]
+        self.assertEqual((lv["pdh"], lv["pdl"]), (day.high.max(), day.low.min()))
+        self.assertEqual((lv["asia_h"], lv["asia_l"]), (asia.high.max(), asia.low.min()))
+
+    def test_setups_can_be_switched_off(self):
+        df, _ = with_sweep_low(m15())
+        self.assertEqual(evaluate(df, StrategyParams(), SPREAD).setup, "sweep")
+        only_pb = evaluate(df, StrategyParams(setups=("pullback",)), SPREAD)
+        self.assertTrue(only_pb is None or only_pb.setup == "pullback")
+        with self.assertRaises(ValueError):
+            cfg(strategy=StrategyParams(setups=("martingale",)))
+        with self.assertRaises(ValueError):
+            cfg(strategy=StrategyParams(bar_minutes=7))
+
+    def test_mt5_timeframe_constant_follows_config(self):
+        m = fake_mt5()
+        m.TIMEFRAME_H1, m.TIMEFRAME_M5, seen = 16385, 5, []
+        real = m.copy_rates_from_pos
+        m.copy_rates_from_pos = lambda sym, tf, pos, count: seen.append(tf) or real(sym, tf, pos, count)
+        MT5Broker(self.conf(), sleep=lambda x: None, mt5=m).bars("EURUSD", 10)
+        MT5Broker(cfg(), sleep=lambda x: None, mt5=m).bars("EURUSD", 10)
+        self.assertEqual(seen, [16385, 15])
+
+    def test_loader_reads_pandas_style_csv_and_resamples_to_target(self):
+        df = m15(96, end="2024-03-13 23:45")
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "x.csv"
+            df.rename(columns=str.capitalize).to_csv(p)
+            self.assertEqual(len(bt.load_m15(p)), 96)
+            h = bt.load_m15(p, minutes=60)
+            self.assertEqual(len(h), 24)
+            self.assertAlmostEqual(h.high.iloc[0], df.high.iloc[:4].max())
+            self.assertAlmostEqual(h.close.iloc[0], df.close.iloc[3])
+            hp = Path(d) / "h.csv"
+            h.to_csv(hp)
+            with self.assertRaises(ValueError):                    # saatlik veri M15 olarak kullanılamaz
+                bt.load_m15(hp, minutes=15)
+
+    def test_walk_forward_tests_only_on_unseen_period(self):
+        folds, oos = bt.walk_forward({"EURUSD": self.h1(2600, seed=3)}, self.conf(),
+                                     {"max_stop_atr": [2.0, 3.0]}, train_days=40, test_days=20, min_trades=3)
+        self.assertGreaterEqual(len(folds), 2)
+        for f in folds.itertuples():
+            tr_end = pd.Timestamp(f.egitim.split("..")[1])
+            te_start, te_end = (pd.Timestamp(x) for x in f.test.split(".."))
+            self.assertEqual(te_start, tr_end)
+            self.assertGreater(te_end, te_start)
+        if len(oos):
+            first_test = pd.Timestamp(folds.test.iloc[0].split("..")[0])
+            self.assertGreaterEqual(pd.to_datetime(oos.open_time).min(), first_test)
+
+    def test_single_time_conversion_path_in_zone_mode(self):
+        b = MT5Broker(cfg(server_time={"tz": "America/New_York", "plus_hours": 7}), sleep=lambda x: None, mt5=fake_mt5())
+        ep = lambda t: (pd.Timestamp(t) - pd.Timestamp("1970-01-01")).total_seconds()
+        for t in ("2024-03-10 09:30", "2024-03-08 12:00", "2024-11-03 08:30", "2024-07-01 00:15"):   # yaz saati geçişleri dahil
+            self.assertEqual(pd.Timestamp(b._utc(ep(t))), b._utc_index([ep(t)])[0], t)
 
 
 class Plan(unittest.TestCase):

@@ -8,12 +8,15 @@ from pathlib import Path
 
 @dataclass
 class StrategyParams:
+    bar_minutes: int = 15             # tetik zaman dilimi (dakika): 5, 15, 30 ya da 60
+    setups: tuple = ("sweep", "pullback")   # etkin kurulumlar; biri çıkarılarak ayrı ayrı sınanabilir
     atr_period: int = 14
     min_bars: int = 600               # değerlendirme için gereken en az M15 çubuğu
     h1_ema: int = 50                  # yön: H1 kapanışlarının EMA'sı
     h4_ema: int = 20                  # yön: H4 kapanışlarının EMA'sı
     asia_end_hour: int = 7            # UTC; Asya aralığı 00:00 - bu saat
-    min_day_bars: int = 40            # "önceki gün" sayılması için gereken en az M15 çubuğu (10 saat)
+    min_day_hours: float = 10.0       # "önceki gün" sayılması için o günde gereken en az veri (saat)
+    min_asia_hours: float = 2.0       # Asya aralığı için gereken en az veri (saat)
     sweep_fresh_bars: int = 4         # süpürmeden önce bu kadar çubuk seviyenin doğru tarafında kapanmış olmalı
     sweep_close_frac: float = 0.6     # süpürme çubuğu aralığının bu kadarını geri almış olmalı
     sweep_min_range_atr: float = 0.8
@@ -83,6 +86,7 @@ class Config:
         if unknown:
             raise ValueError(f"Bilinmeyen ayar(lar): {sorted(unknown)}")
         strat = StrategyParams(**raw.pop("strategy", {}))
+        strat.setups = tuple(strat.setups)
         cfg = Config(strategy=strat, **raw)
         cfg.risk_tiers = {int(k): float(v) for k, v in cfg.risk_tiers.items()}
         cfg.entry_hours = tuple(cfg.entry_hours)
@@ -101,6 +105,10 @@ class Config:
             raise ValueError("max_portfolio_risk (0, 0.10] aralığında olmalı")
         if not 0 <= self.entry_hours[0] < self.entry_hours[1] <= self.flat_hour <= 23:
             raise ValueError("entry_hours ve flat_hour tutarsız")
+        if not self.strategy.setups or set(self.strategy.setups) - {"sweep", "pullback"}:
+            raise ValueError('strategy.setups "sweep" ve/veya "pullback" içermeli')
+        if self.strategy.bar_minutes not in (5, 15, 30, 60):
+            raise ValueError("strategy.bar_minutes 5, 15, 30 ya da 60 olmalı")
         if not 0 < self.dd_half_risk < self.dd_halt < 1:
             raise ValueError("dd_half_risk < dd_halt olmalı")
         if not 0 <= self.withdraw_frac <= 1:

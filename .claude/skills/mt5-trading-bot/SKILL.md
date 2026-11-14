@@ -92,6 +92,13 @@ trading/
   - Kural değişikliğinde `tests/test_fitil.py` çalıştırılır; para ve emirle ilgili her davranışın testi olmalı.
   - `mt5_broker.py` gerçek terminalde çalıştırılmadı; kullanıcı ilk çalıştırmada hata bildirirse
     önce orayı şüpheli say.
+  - Kanıt durumu: strateji EURUSD saatlik gerçek veride (2017-18, 127 işlem) ortalama -0,16R verdi;
+    süpürme kurulumu en kötüsü. Stratejiyi "çalışıyor" diye sunma. Yeni kural önerirken önce
+    `fitil.backtest --wf` ile örnek dışı sonuç al; eğitim dönemi sonucu kanıt değildir.
+  - Bu ortamda paket indirmek gerekirse pip'i ortam proxy'sinden geçir (`NO_PROXY= no_proxy= pip ...`).
+    `backtesting` paketi içinde gerçek EURUSD saatlik örnek veri var (`backtesting/test/EURUSD.csv`).
+  - Para akışı (yatırma/çekme) mantığı `engine._apply_flows` içinde; değiştirirsen
+    `test_random_flows_and_pnl_match_ground_truth_drawdown` testi geçmeli.
 - **Günlük trend portföyü (`research/fxlab` + `mql5/`):** FRED günlük verisinde 2000-2026
   maliyet sonrası kâr etmedi (bkz. `README.md`). Canlıya alınmaz; motoru araştırma için durur.
 
