@@ -19,7 +19,7 @@ Hedef küçük ve güvenli günlük kazanç değil, sermayeyi **en yükseğe** b
 Bunun yolu:
 - **Seçicilik:** çoğu gün işlem yok. Yalnızca birden çok etkenin aynı yönü gösterdiği
   kurulumlar alınır.
-- **Kanaate göre boyut:** zayıf kurulum 0,25R-birim, standart %0,5, tam uyumlu kurulum %1
+- **Kanaate göre boyut:** zayıf kurulum %0,25, standart %0,5, tam uyumlu kurulum %1
   özkaynak riski. Portföy ve günlük kayıp sınırları her durumda geçerlidir.
 - **Kazanana ekleme:** yalnızca ilk pozisyonun stopu başabaşa/kâra taşındıktan sonra
   eklenir; zarardaki pozisyona asla eklenmez.
