@@ -23,6 +23,7 @@ Bunun yolu:
   özkaynak riski. Portföy ve günlük kayıp sınırları her durumda geçerlidir.
 - **Kazanana ekleme:** yalnızca ilk pozisyonun stopu başabaşa/kâra taşındıktan sonra
   eklenir; zarardaki pozisyona asla eklenmez.
+  (Fitil'de henüz uygulanmadı; eklenirse önce gerçek veride örnek dışı sınanmalı.)
 - **Bileşik büyüme:** lot her işlemde güncel özkaynaktan hesaplanır.
 - **Düşüşte fren:** zirveden %10 düşüşte risk yarıya iner, %20'de sistem durur ve gözden
   geçirilir.
