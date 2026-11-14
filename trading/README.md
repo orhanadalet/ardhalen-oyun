@@ -25,6 +25,10 @@ ve hiçbir gerçek piyasa verisinde sınanmadı. Stratejinin kâr ettiğine dair
 - **Portföy:** toplam açık risk en fazla %4, tek USD yönünde net risk en fazla %2,
   günlük kayıp %2'yi aşarsa o gün yeni giriş yok (son madde yalnızca EA'da).
 
+- **Kısmi kâr (isteğe bağlı, şimdilik yalnızca Python'da):** `Params(partial_r=1.0)` ile fiyat
+  stop mesafesi kadar lehe gidince pozisyonun yarısı kapatılır ve stop girişe çekilir.
+  Kazanma oranını yükseltir, büyük kazançları küçültür.
+
 ## 1. Python testleri
 
 ```

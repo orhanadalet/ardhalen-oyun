@@ -172,6 +172,32 @@ class Engine(unittest.TestCase):
         self.assertLessEqual(risk, 0.025 * Params().initial_equity)
         self.assertGreater(res.skipped["portfolio_cap"], 0)
 
+    def test_equity_equals_initial_plus_trade_pnl(self):
+        # Muhasebe değişmezi: son özkaynak = başlangıç + işlemlerin net K/Z toplamı (kısmi kapanış dahil)
+        df = synthetic(1500, regime_len=150, regime_drift=0.0015, seed=5)
+        for pr in (0.0, 1.0):
+            res = run({"EURUSD": df}, {"EURUSD": U["EURUSD"]}, Params(partial_r=pr))
+            self.assertAlmostEqual(res.equity.iloc[-1], Params().initial_equity + res.trades.pnl.sum(), places=4)
+
+    def test_partial_take_profit_locks_gain_when_price_reverses(self):
+        # Fiyat +1R'yi geçer, sonra girişin altına çöker: kısmi kârsız zarar, kısmi kârla kazanç.
+        df = ramp(200)
+        peak = df.index[150]
+        after = df.index[151:]
+        fall = df.close.loc[peak] - 0.004 * np.arange(1, len(after) + 1)
+        df.loc[after, "close"] = fall
+        df.loc[after, "open"] = fall + 0.002
+        df.loc[after, "high"] = fall + 0.0025
+        df.loc[after, "low"] = fall - 0.0005
+        p0 = Params(lookbacks=(120,), stop_atr=30.0)         # geç giriş, uzak stop: çıkış sinyalle
+        plain = run({"EURUSD": df}, {"EURUSD": free("EURUSD")}, p0).trades.iloc[0]
+        part = run({"EURUSD": df}, {"EURUSD": free("EURUSD")},
+                   Params(lookbacks=(120,), stop_atr=30.0, partial_r=0.2)).trades.iloc[0]
+        self.assertLess(plain.pnl, 0)
+        self.assertGreater(part.pnl, 0)
+        self.assertEqual(part.reason, "stop")                 # kalan yarı başabaşta kapanır
+        self.assertAlmostEqual(part.exit, part.entry, delta=0.002)   # başabaş stopu (açılış boşluğu payıyla)
+
     def test_random_walk_with_costs_is_not_profitable_on_average(self):
         # Kenar (edge) olmayan veride maliyetli strateji ortalamada para kazanmamalı.
         finals = []

@@ -28,6 +28,10 @@ class Params:
     max_portfolio_risk: float = 0.04   # tüm açık pozisyonların stopa kadar toplam riski
     max_usd_net_risk: float = 0.02     # tek USD yönünde net risk
     initial_equity: float = 100_000.0
+    # Kısmi kâr alma: fiyat partial_r * (başlangıç stop mesafesi) kadar lehe gidince pozisyonun
+    # partial_frac kadarı kapatılır ve stop girişe (başabaş) çekilir. 0 = kapalı.
+    partial_r: float = 0.0
+    partial_frac: float = 0.5
 
 
 @dataclass
@@ -41,6 +45,10 @@ class Position:
     initial_risk: float
     costs: float = 0.0
     last_time: pd.Timestamp | None = None
+    init_dist: float = 0.0
+    lots0: float = 0.0
+    realized: float = 0.0        # kısmi kapanıştan gelen gerçekleşmiş K/Z
+    partial_done: bool = False
 
 
 @dataclass
@@ -90,8 +98,8 @@ def run(data: dict[str, pd.DataFrame], universe: dict[str, Instrument], params: 
         px = bid_price if pos.direction > 0 else bid_price + inst.spread
         gross = inst.pnl_usd(pos.lots, pos.direction, pos.entry, px)
         balance += gross
-        net = gross - pos.costs
-        trades.append(dict(symbol=sym, direction=pos.direction, lots=pos.lots, entry_time=pos.entry_time,
+        net = gross + pos.realized - pos.costs
+        trades.append(dict(symbol=sym, direction=pos.direction, lots=pos.lots0, entry_time=pos.entry_time,
                            exit_time=t, entry=pos.entry, exit=px, pnl=net, costs=pos.costs,
                            r=net / pos.initial_risk if pos.initial_risk > 0 else np.nan, reason=reason))
 
@@ -144,7 +152,8 @@ def run(data: dict[str, pd.DataFrame], universe: dict[str, Instrument], params: 
                     continue
             commission = inst.commission_per_lot * lots
             balance -= commission
-            positions[s] = Position(s, direction, lots, entry, stop, t, risk, costs=commission, last_time=t)
+            positions[s] = Position(s, direction, lots, entry, stop, t, risk, costs=commission, last_time=t,
+                                    init_dist=dist, lots0=lots)
             last_close.setdefault(s, o)
         for s in list(pending_entry):
             if s in bars:
@@ -161,6 +170,21 @@ def run(data: dict[str, pd.DataFrame], universe: dict[str, Instrument], params: 
                 if b["high"] + inst.spread >= pos.stop:
                     ask_fill = max(pos.stop, b["open"] + inst.spread) + inst.slippage
                     close(s, ask_fill - inst.spread, t, "stop")
+            # Kısmi kâr: aynı çubukta hem stop hem hedef görüldüyse önce stop varsayılır (temkinli).
+            if s in positions and p.partial_r > 0 and not pos.partial_done:
+                tp = pos.entry + pos.direction * p.partial_r * pos.init_dist
+                hit = b["high"] >= tp if pos.direction > 0 else b["low"] + inst.spread <= tp
+                if hit:
+                    px = max(tp, b["open"]) if pos.direction > 0 else min(tp, b["open"] + inst.spread)
+                    part = inst.round_lots(pos.lots * p.partial_frac)
+                    rest = round(pos.lots - part, 8)
+                    if part > 0 and rest >= inst.volume_min - 1e-12:
+                        gain = inst.pnl_usd(part, pos.direction, pos.entry, px)
+                        balance += gain
+                        pos.realized += gain
+                        pos.lots = rest
+                    pos.partial_done = True
+                    pos.stop = max(pos.stop, pos.entry) if pos.direction > 0 else min(pos.stop, pos.entry)
 
         # 5) Kapanış: iz süren stop, sinyaller, değerleme
         for s, b in bars.items():
