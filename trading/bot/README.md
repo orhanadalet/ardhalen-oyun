@@ -1,9 +1,9 @@
-# ardbot: M15 gün içi işlem botu
+# Fitil: M15 gün içi işlem botu
 
 Python ile yazılmış, MetaTrader 5'e bağlanan gün içi bot. 7 major parite, altın ve petrolde
 her M15 çubuğu kapanışında tarama yapar.
 
-**Durum:** mantık simüle brokerla test edildi (bkz. `trading/tests/test_ardbot.py`).
+**Durum:** mantık simüle brokerla test edildi (bkz. `trading/tests/test_fitil.py`).
 MT5 bağlantısı gerçek bir terminalde henüz çalıştırılmadı. Strateji kuralları gerçek gün içi
 veride sınanmadı; kâr ettiğine dair kanıt yoktur. Önce `--trade` olmadan, sonra yalnızca demo hesapta.
 
@@ -45,14 +45,14 @@ Küçük hesaplar için cent hesap gerekir.
 
 ```
 cd trading\bot
-python -m ardbot --config config.json            # yalnızca sinyal yazar, emir göndermez
-python -m ardbot --config config.json --trade    # demo hesapta emir gönderir
+python -m fitil --config config.json            # yalnızca sinyal yazar, emir göndermez
+python -m fitil --config config.json --trade    # demo hesapta emir gönderir
 ```
 
 Gerçek hesapta çalışmayı bot varsayılan olarak reddeder (`--allow-real` gerekir). Bu karar sizindir.
 
-Çalışırken iki dosya oluşur: `ardbot_journal.csv` (her sinyal, giriş, stop taşıma, çıkış) ve
-`ardbot_state.json` (gün başı özkaynak, zirve, günlük işlem sayısı).
+Çalışırken iki dosya oluşur: `fitil_journal.csv` (her sinyal, giriş, stop taşıma, çıkış) ve
+`fitil_state.json` (gün başı özkaynak, zirve, günlük işlem sayısı).
 
 ## Bilinen sınırlar
 

@@ -186,7 +186,7 @@ class Engine:
         if self.dry_run:
             self._journal(now, "SİNYAL", sym, **info)
             return False
-        res = b.market_order(sym, sig.direction, lots, sl, f"ard-{sig.setup}")
+        res = b.market_order(sym, sig.direction, lots, sl, f"fitil-{sig.setup}")
         if not res.ok:
             self._journal(now, "RED", sym, mesaj=res.message, **info)
             return False

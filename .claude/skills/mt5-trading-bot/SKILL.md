@@ -73,7 +73,7 @@ hareket eder.
 trading/
   mql5/Experts/ArdhalenPortfolioTrend.mq5   çok sembollü portföy EA'sı
   mql5/Include/Ardhalen/                    Signals.mqh, Risk.mqh
-  bot/ardbot/                               M15 gün içi Python botu (strategy, engine, PaperBroker, MT5 bağdaştırıcısı)
+  bot/fitil/                               M15 gün içi Python botu (strategy, engine, PaperBroker, MT5 bağdaştırıcısı)
   bot/README.md                             botun kurulumu ve kuralları
   research/fxlab/                           Python backtest motoru (maliyet, portföy sınırı, walk-forward)
   tests/                                    python -m unittest discover -s tests  (trading/ içinden)
@@ -83,7 +83,7 @@ trading/
 
 ## İki sistem
 
-- **Gün içi bot (`bot/ardbot`, asıl hedef):** M15 tarama, likidite süpürmesi + trend geri
+- **Gün içi bot (`bot/fitil`, asıl hedef):** M15 tarama, likidite süpürmesi + trend geri
   çekilmesi, gün sonunda düz. Canlı tarafı Python `MetaTrader5` paketiyle kullanıcının
   Windows'unda çalışır; burada `PaperBroker` ile test edilir. Strateji mantığı yalnızca
   `strategy.py` içindedir; canlı ve simülasyon aynı kodu kullanır.

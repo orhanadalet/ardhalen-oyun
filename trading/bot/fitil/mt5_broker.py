@@ -150,7 +150,7 @@ class MT5Broker:
             "action": self.mt5.TRADE_ACTION_DEAL, "symbol": pos.symbol, "volume": pos.lots,
             "type": self._order_type(-pos.direction), "position": pos.ticket,
             "price": t.bid if pos.direction > 0 else t.ask, "deviation": self.cfg.deviation_points,
-            "magic": self.cfg.magic, "comment": "ard-kapat", "type_time": self.mt5.ORDER_TIME_GTC,
+            "magic": self.cfg.magic, "comment": "fitil-kapat", "type_time": self.mt5.ORDER_TIME_GTC,
             "type_filling": self._filling(pos.symbol),
         })
 

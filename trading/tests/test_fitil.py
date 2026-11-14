@@ -11,11 +11,11 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bot"))
 
-from ardbot.broker import PaperBroker, Pos, Spec, round_lots_down   # noqa: E402
-from ardbot.config import Config, StrategyParams                    # noqa: E402
-from ardbot.engine import Engine                                    # noqa: E402
-from ardbot.mt5_broker import MT5Broker                             # noqa: E402
-from ardbot.strategy import evaluate, htf_bias, liquidity_levels    # noqa: E402
+from fitil.broker import PaperBroker, Pos, Spec, round_lots_down   # noqa: E402
+from fitil.config import Config, StrategyParams                    # noqa: E402
+from fitil.engine import Engine                                    # noqa: E402
+from fitil.mt5_broker import MT5Broker                             # noqa: E402
+from fitil.strategy import evaluate, htf_bias, liquidity_levels    # noqa: E402
 
 SPREAD = 0.00002
 SPEC = Spec("EURUSD", 5, 0.00001, 0.01, 0.01, 100.0)
@@ -301,7 +301,7 @@ class MT5Adapter(unittest.TestCase):
     def test_order_request_carries_stop_magic_and_filling(self):
         m = fake_mt5()
         b = MT5Broker(cfg(), mt5=m)
-        res = b.market_order("EURUSD", 1, 0.10, 1.0950, "ard-sweep")
+        res = b.market_order("EURUSD", 1, 0.10, 1.0950, "fitil-sweep")
         self.assertTrue(res.ok)
         self.assertEqual(res.ticket, 777)
         req = m.sent[0]

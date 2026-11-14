@@ -1,7 +1,7 @@
 """Canlı çalıştırma (Windows + MT5):
 
-    python -m ardbot --config config.json              # sinyalleri yazar, EMİR GÖNDERMEZ
-    python -m ardbot --config config.json --trade      # demo hesapta emir gönderir
+    python -m fitil --config config.json              # sinyalleri yazar, EMİR GÖNDERMEZ
+    python -m fitil --config config.json --trade      # demo hesapta emir gönderir
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from .engine import Engine
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(prog="ardbot")
+    ap = argparse.ArgumentParser(prog="fitil")
     ap.add_argument("--config", required=True)
     ap.add_argument("--trade", action="store_true", help="emir gönder (yoksa yalnızca sinyal yazar)")
     ap.add_argument("--allow-real", action="store_true", help="gerçek hesapta çalışmaya izin ver")
@@ -27,7 +27,7 @@ def main() -> None:
     mode = "EMİR GÖNDERİR" if a.trade else "yalnızca sinyal (dry-run)"
     print(f"Hesap: {'DEMO' if acct.is_demo else 'GERÇEK'}  özkaynak={acct.equity:.2f} {acct.currency}  mod: {mode}")
     work = Path(a.workdir)
-    engine = Engine(broker, cfg, state_path=work / "ardbot_state.json", journal_path=work / "ardbot_journal.csv",
+    engine = Engine(broker, cfg, state_path=work / "fitil_state.json", journal_path=work / "fitil_journal.csv",
                     dry_run=not a.trade)
     try:
         engine.run()
