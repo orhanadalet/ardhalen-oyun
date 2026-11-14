@@ -6,6 +6,25 @@ Oyun sitesinden bağımsızdır; yalnızca bu klasörde yaşar.
 **Durum:** Python araştırma tarafı test edildi. MQL5 kodu yazıldı ama henüz derlenmedi
 ve hiçbir gerçek piyasa verisinde sınanmadı. Stratejinin kâr ettiğine dair kanıt yoktur.
 
+## İlk gerçek veri sonucu (Kasım 2026)
+
+FRED günlük verisi, 2000-2026, 7 major parite + WTI + Brent (altın yok; günde tek fiyat,
+gün içi stop yok; swap sabit varsayım):
+
+| Senaryo | Yıllık getiri | Sharpe | Azami düşüş | İşlem | Kazanma |
+|---|---|---|---|---|---|
+| Temel (%0,5 risk) | -%1,5 | -0,06 | -%63 | 2574 | %35 |
+| Maliyetsiz | +%1,3 | 0,17 | -%47 | 2560 | %37 |
+| Kısmi kâr 1R | -%1,9 | -0,16 | -%61 | 2580 | %42 |
+| Stop 5 ATR | -%0,3 | 0,01 | -%39 | 1419 | %34 |
+
+Walk-forward (5 yıl eğitim, 1 yıl test, 21 dilim): yıllık -%2,7, 21 dilimin 5'i pozitif.
+2000-2013 arası Sharpe 0,24; 2013-2026 arası -0,40.
+
+**Sonuç: bu trend takip kuralları bu enstrümanlarda maliyet sonrası para kazandırmıyor.
+EA bu haliyle canlıya ya da demoya alınmamalı.** Altyapı (motor, risk sınırları, testler)
+geçerli; değişmesi gereken sinyal.
+
 ## İçerik
 
 | Yol | Ne |
