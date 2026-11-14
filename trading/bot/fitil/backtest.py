@@ -64,9 +64,17 @@ def load_m15(path: str | Path, tz_shift_hours: float = 0.0, minutes: int = 15) -
         df.columns = [c.strip().lower() for c in df.columns]
         stamps = df.index.astype(str)
         if len(stamps) and len(stamps[0]) >= 10 and stamps[0][2] == "." and stamps[0][5] == ".":
-            df.index = pd.to_datetime(stamps.str.slice(0, 19), format="%d.%m.%Y %H:%M:%S")
+            idx = pd.to_datetime(stamps.str.slice(0, 19), format="%d.%m.%Y %H:%M:%S")
+            gmt = stamps.str.extract(r"GMT([+-])(\d{2})(\d{2})")          # "Local time" dışa aktarımı: satır başına fark
+            if gmt[0].notna().all():
+                sign = np.where(gmt[0].to_numpy() == "-", -1, 1)
+                offset = sign * (gmt[1].astype(int).to_numpy() * 60 + gmt[2].astype(int).to_numpy())
+                idx = idx - pd.to_timedelta(offset, unit="m")              # yerel -> UTC
+            df.index = idx
         else:
             df.index = pd.to_datetime(stamps)
+        if "volume" in df.columns:                                         # kapalı piyasa dolgusu: hacimsiz düz çubuklar
+            df = df[~((df["volume"] == 0) & (df["high"] == df["low"]))]
     elif "<" in first or "date" in first.lower():
         df = pd.read_csv(path, sep=None, engine="python")
         df.columns = [c.strip().strip("<>").lower() for c in df.columns]

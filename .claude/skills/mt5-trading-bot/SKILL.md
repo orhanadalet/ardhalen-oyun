@@ -92,14 +92,16 @@ trading/
   - Kural değişikliğinde `tests/test_fitil.py` çalıştırılır; para ve emirle ilgili her davranışın testi olmalı.
   - `mt5_broker.py` gerçek terminalde çalıştırılmadı; kullanıcı ilk çalıştırmada hata bildirirse
     önce orayı şüpheli say.
-  - Kanıt durumu: strateji EURUSD saatlik gerçek veride (Ocak 2017 - Şubat 2018, 181 işlem) ortalama
-    -0,12R verdi. Olay çalışmasında süpürme sinyalinden sonra fiyat ortalamada sinyalin tersine gitti
-    (kırılım devam etti); geri çekilme sinyalinin öngörü gücü yok. Ayrıntı `bot/README.md` içinde.
-    Açık hipotez: süpürme yerine kırılım devamı. Bağımsız veride sınanmadan kural yapılmaz. Stratejiyi "çalışıyor" diye sunma. Yeni kural önerirken önce
-    `fitil.backtest --wf` ile örnek dışı sonuç al; eğitim dönemi sonucu kanıt değildir.
+  - Kanıt durumu (gerçek EURUSD verisi, kurallar veriye göre ayarlanmadan):
+    geri çekilme M15 2019-20: +0,14R (197 işlem, z=1,3); saatlik 2019-20: +0,16R; saatlik 2017: -0,10R.
+    Süpürme hiçbir dönemde kazandırmadı ve varsayılan olarak kapalı. Yani umut verici ama kanıtlanmamış;
+    stratejiyi "çalışıyor" diye sunma. Yeni kural önerirken önce `fitil.backtest --wf` ile örnek dışı
+    sonuç al; eğitim dönemi sonucu kanıt değildir. Ayrıntı `bot/README.md` içinde.
+  - Gerçek örnek veri: `python bot/tools/fetch_sample_data.py` (EURUSD M1 2019-20, H1 2017). Başka
+    parite, altın ve petrol için gün içi veri hâlâ kullanıcıdan gelmeli.
   - Bu ortamda paket indirmek gerekirse pip'i ortam proxy'sinden geçir (`NO_PROXY= no_proxy= pip ...`).
-    Gerçek EURUSD saatlik örnek veri: `backtesting` paketi (`backtesting/test/EURUSD.csv`) ve
-    `gym-anytrading` paketi (`gym_anytrading/datasets/data/FOREX_EURUSD_1H_ASK.csv`).
+    Paket kodunu çalıştırma; yalnızca veri dosyalarını aç. `tick-backtest` paketindeki tick verisi sentetiktir.
+  - MT5 terminali bu ortamda çalıştırılamaz (Wine yok, apt ve MetaQuotes sunucuları ağ politikasıyla kapalı).
   - Para akışı (yatırma/çekme) mantığı `engine._apply_flows` içinde; değiştirirsen
     `test_random_flows_and_pnl_match_ground_truth_drawdown` testi geçmeli.
 - **Günlük trend portföyü (`research/fxlab` + `mql5/`):** FRED günlük verisinde 2000-2026

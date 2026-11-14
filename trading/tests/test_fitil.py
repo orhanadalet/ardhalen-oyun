@@ -21,6 +21,13 @@ from fitil import backtest as bt                                   # noqa: E402
 from fitil import events                                           # noqa: E402
 
 SPREAD = 0.00002
+
+
+def SP(**kw):
+    """Testler iki kurulumu da kapsar (varsayılan yapılandırmada süpürme kapalıdır)."""
+    kw.setdefault("setups", ("sweep", "pullback"))
+    return StrategyParams(**kw)
+
 SPEC = Spec("EURUSD", 5, 0.00001, 0.01, 0.01, 100.0)
 
 
@@ -37,7 +44,7 @@ def m15(n=1600, end="2024-03-13 09:00", drift=2e-6, wig=0.0004):
 def with_sweep_low(df):
     """Son çubuğu önceki günün dibini süpürüp geri içeride kapanan bir çubuğa çevirir."""
     df = df.copy()
-    p = StrategyParams()
+    p = SP()
     pdl = liquidity_levels(df.iloc[:-1], p)["pdl"]
     for k in range(2, 7):                                   # önceki çubuklar seviyenin hemen üstünde
         df.iloc[-k] = [pdl + 0.0003, pdl + 0.0004, pdl + 0.0002, pdl + 0.0003]
@@ -52,6 +59,7 @@ def paper(df, equity=10_000.0, start=None, **kw):
 
 def cfg(**kw):
     kw.setdefault("settle_sec", 0.0)        # simülasyonda saat tam çubuk kapanışındadır
+    kw.setdefault("strategy", SP())
     c = Config(symbols={"EURUSD": {"usd_beta": -1}}, **kw)
     c.validate()
     return c
@@ -68,7 +76,7 @@ def at_end(df):
 class Strategy(unittest.TestCase):
     def test_sweep_of_previous_day_low_gives_long_with_stop_below_wick(self):
         df, pdl = with_sweep_low(m15())
-        sig = evaluate(df, StrategyParams(), SPREAD)
+        sig = evaluate(df, SP(), SPREAD)
         self.assertIsNotNone(sig)
         self.assertEqual((sig.direction, sig.setup), (1, "sweep"))
         self.assertLess(sig.stop, df.low.iloc[-1])
@@ -77,19 +85,19 @@ class Strategy(unittest.TestCase):
     def test_no_sweep_when_bar_closes_below_level(self):
         df, pdl = with_sweep_low(m15())
         df.iloc[-1] = [pdl + 0.0001, pdl + 0.00015, pdl - 0.0004, pdl - 0.0003]   # gerçek kırılım
-        sig = evaluate(df, StrategyParams(), SPREAD)
+        sig = evaluate(df, SP(), SPREAD)
         self.assertTrue(sig is None or sig.setup != "sweep" or sig.direction != 1)
 
     def test_wide_spread_rejects_trade(self):
         df, _ = with_sweep_low(m15())
-        self.assertIsNone(evaluate(df, StrategyParams(), spread=0.0005))    # stop < 10 x spread
+        self.assertIsNone(evaluate(df, SP(), spread=0.0005))    # stop < 10 x spread
 
     def test_mirror_gives_short_on_high_sweep(self):
         df, _ = with_sweep_low(m15())
         mirrored = df.copy()
         for col, src in (("open", "open"), ("close", "close"), ("high", "low"), ("low", "high")):
             mirrored[col] = 2.2 - df[src]
-        sig = evaluate(mirrored, StrategyParams(), SPREAD)
+        sig = evaluate(mirrored, SP(), SPREAD)
         self.assertIsNotNone(sig)
         self.assertEqual((sig.direction, sig.setup), (-1, "sweep"))
         self.assertGreater(sig.stop, mirrored.high.iloc[-1])
@@ -97,14 +105,14 @@ class Strategy(unittest.TestCase):
     def test_signal_uses_only_closed_bars_no_lookahead(self):
         df, _ = with_sweep_low(m15())
         future = pd.concat([df, m15(50, end="2024-03-13 21:30") * 3.0])
-        self.assertEqual(evaluate(df, StrategyParams(), SPREAD), evaluate(future.iloc[:len(df)], StrategyParams(), SPREAD))
+        self.assertEqual(evaluate(df, SP(), SPREAD), evaluate(future.iloc[:len(df)], SP(), SPREAD))
 
     def test_bias_follows_trend(self):
-        self.assertEqual(htf_bias(m15(drift=2e-5, wig=0.0001), StrategyParams()), 1)
-        self.assertEqual(htf_bias(m15(drift=-2e-5, wig=0.0001), StrategyParams()), -1)
+        self.assertEqual(htf_bias(m15(drift=2e-5, wig=0.0001), SP()), 1)
+        self.assertEqual(htf_bias(m15(drift=-2e-5, wig=0.0001), SP()), -1)
 
     def test_too_little_history_returns_none(self):
-        self.assertIsNone(evaluate(m15(200), StrategyParams(), SPREAD))
+        self.assertIsNone(evaluate(m15(200), SP(), SPREAD))
 
 
 class EngineTests(unittest.TestCase):
@@ -729,7 +737,7 @@ class ReviewFixes(unittest.TestCase):
         sun = df.index.normalize() == pd.Timestamp("2024-03-10")
         df.loc[fri, "high"], df.loc[fri, "low"] = 1.1050, 1.0950
         df.loc[sun, "high"], df.loc[sun, "low"] = 1.1010, 1.0990
-        lv = liquidity_levels(df, StrategyParams())
+        lv = liquidity_levels(df, SP())
         self.assertEqual((lv["pdh"], lv["pdl"]), (1.1050, 1.0950))
 
     def test_news_release_bar_itself_is_blocked(self):
@@ -875,9 +883,16 @@ class Timeframes(unittest.TestCase):
         self.assertEqual((lv["pdh"], lv["pdl"]), (day.high.max(), day.low.min()))
         self.assertEqual((lv["asia_h"], lv["asia_l"]), (asia.high.max(), asia.low.min()))
 
+    def test_sweep_setup_is_off_by_default(self):
+        df, _ = with_sweep_low(m15())
+        self.assertEqual(StrategyParams().setups, ("pullback",))
+        default = evaluate(df, StrategyParams(), SPREAD)
+        self.assertTrue(default is None or default.setup == "pullback")
+        self.assertEqual(evaluate(df, SP(), SPREAD).setup, "sweep")
+
     def test_setups_can_be_switched_off(self):
         df, _ = with_sweep_low(m15())
-        self.assertEqual(evaluate(df, StrategyParams(), SPREAD).setup, "sweep")
+        self.assertEqual(evaluate(df, SP(), SPREAD).setup, "sweep")
         only_pb = evaluate(df, StrategyParams(setups=("pullback",)), SPREAD)
         self.assertTrue(only_pb is None or only_pb.setup == "pullback")
         with self.assertRaises(ValueError):
@@ -920,6 +935,25 @@ class Timeframes(unittest.TestCase):
             self.assertEqual(df.index[0], pd.Timestamp("2017-02-01 22:00"))      # 1 Şubat, 2 Ocak değil
             self.assertEqual(df.index[-1], pd.Timestamp("2017-02-02 00:00"))
             self.assertAlmostEqual(df.close.iloc[1], 1.05282)
+
+    def test_loader_dukascopy_local_time_offsets_and_closed_market_fill(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "duka_local.csv"
+            p.write_text("Local time,Open,High,Low,Close,Volume\n"
+                         "08.03.2019 16:58:00.000 GMT-0500,1.1235,1.1236,1.1234,1.1235,10\n"      # kış: UTC 21:58
+                         "08.03.2019 16:59:00.000 GMT-0500,1.1235,1.1237,1.1235,1.1236,12\n"
+                         "08.03.2019 17:00:00.000 GMT-0500,1.1236,1.1236,1.1236,1.1236,0\n"       # kapalı piyasa dolgusu
+                         "09.03.2019 12:00:00.000 GMT-0500,1.1236,1.1236,1.1236,1.1236,0\n"
+                         "11.03.2019 03:00:00.000 GMT-0400,1.1240,1.1242,1.1239,1.1241,20\n"      # yaz: UTC 07:00
+                         "11.03.2019 03:01:00.000 GMT-0400,1.1241,1.1243,1.1240,1.1242,20\n"
+                         "11.03.2019 03:02:00.000 GMT-0400,1.1242,1.1244,1.1241,1.1243,20\n")
+            df = bt.load_m15(p, minutes=1)
+            self.assertEqual(list(df.index), [pd.Timestamp("2019-03-08 21:58"), pd.Timestamp("2019-03-08 21:59"),
+                                              pd.Timestamp("2019-03-11 07:00"), pd.Timestamp("2019-03-11 07:01"),
+                                              pd.Timestamp("2019-03-11 07:02")])
+            m = bt.load_m15(p, minutes=15)
+            self.assertEqual(list(m.index), [pd.Timestamp("2019-03-08 21:45"), pd.Timestamp("2019-03-11 07:00")])
+            self.assertAlmostEqual(m.high.iloc[1], 1.1244)
 
     def test_walk_forward_tests_only_on_unseen_period(self):
         folds, oos = bt.walk_forward({"EURUSD": self.h1(2600, seed=3)}, self.conf(),

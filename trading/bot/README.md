@@ -4,18 +4,19 @@ Python ile yazılmış, MetaTrader 5'e bağlanan gün içi bot. 7 major parite, 
 her M15 çubuğu kapanışında tarama yapar.
 
 **Durum (Kasım 2026):**
-- Mantık simüle brokerla 92 testle ve iki bağımsız kod incelemesiyle sınandı.
-- MT5 bağlantısı gerçek terminalde çalıştırılmadı (bu yalnızca Windows'ta mümkün). Kullanılan tüm
-  sabitler, fonksiyonlar, alan ve istek adları resmi `MetaTrader5` paketinin (5.0.6231) kaynağıyla
-  karşılaştırıldı ve eşleşti.
-- **Strateji kârlı görünmüyor.** Eldeki gerçek gün içi veride (EURUSD saatlik, Ocak 2017 - Şubat 2018)
-  181 işlemde ortalama -0,12R verdi; ayrıntı aşağıda "Gerçek veri sonucu" bölümünde.
-  Kendi verinizde sınamadan ve demo hesapta izlemeden gerçek para kullanmayın.
+- Altyapı 95 testle ve iki bağımsız kod incelemesiyle sınandı.
+- MT5 bağlantısı gerçek terminalde çalıştırılmadı: terminal yalnızca Windows'ta çalışır ve bu geliştirme
+  ortamında kurulamıyor. Kullanılan tüm sabitler, fonksiyonlar, alan ve istek adları resmi
+  `MetaTrader5` paketinin (5.0.6231) kaynağıyla karşılaştırıldı ve eşleşti.
+- **Strateji kanıtı karışık, henüz yeterli değil.** Gerçek EURUSD verisinde geri çekilme kurulumu
+  2019-20 döneminde M15'te maliyet sonrası +0,14R (197 işlem), 2017'de saatlikte -0,10R (146 işlem) verdi.
+  Süpürme (fitil) kurulumu iki dönemde de kazandırmadı ve varsayılan olarak kapatıldı.
+  Ayrıntı aşağıda "Gerçek veri sonucu" bölümünde. Demo hesapta izlemeden gerçek para kullanmayın.
 
 ## Ne yapar
 
 - **Tarama:** 5 saniyede bir yeni M15 çubuğu kapanmış mı diye bakar; kapandıysa sinyal arar.
-- **Kurulum 1, likidite süpürmesi:** fiyat önceki günün tepe/dibini ya da Asya aralığını fitille
+- **Kurulum 1, likidite süpürmesi (varsayılan olarak kapalı):** fiyat önceki günün tepe/dibini ya da Asya aralığını fitille
   aşıp geri içeride güçlü kapanırsa süpürmenin tersine girer.
 - **Kurulum 2, trend geri çekilmesi:** H1 ve H4 aynı yöndeyken fiyat M15 EMA'sına çekilip
   trend yönünde kapanırsa girer.
@@ -102,34 +103,48 @@ değilse sonuç şanstan ayırt edilemez.
 
 ## Gerçek veri sonucu
 
-Bu ortamdan ulaşılabilen gerçek gün içi veri: EURUSD saatlik, Ocak 2017 - Şubat 2018 (6.867 çubuk).
-İki bağımsız kaynaktan (iki açık kaynak paketin örnek verisi) birleştirildi; örtüşen 4.356 saatte
-kapanışlar birbirini doğruluyor (ortanca fark 0,00002). Aynı kurallar saatlik çubukta çalıştırıldı
-(`bar_minutes: 60`), varsayılan maliyetlerle:
+Veri: açık kaynak paketlerin içinde dağıtılan gerçek EURUSD verisi (Dukascopy kaynaklı).
+`python tools/fetch_sample_data.py` ile aynı dosyaları indirip sonuçları yeniden üretebilirsiniz.
 
-| Senaryo | İşlem | Kazanma | Ortalama R (standart hata) | Getiri | Azami düşüş |
+| Dönem ve zaman dilimi | Kurulum | İşlem | Kazanma | Ortalama R (std. hata) | Getiri |
 |---|---|---|---|---|---|
-| İki kurulum birlikte | 181 | %30,9 | -0,119 (0,092) | -%12,3 | -%16,9 |
-| Yalnız süpürme | 70 | %25,7 | -0,277 (0,157) | -%9,2 | -%11,8 |
-| Yalnız geri çekilme | 146 | %32,2 | -0,096 (0,096) | -%11,1 | -%15,9 |
+| Mart 2019 - Nisan 2020, **M15** | geri çekilme | 197 | %44,2 | **+0,140** (0,107) | +%18,8 |
+| aynı | süpürme | 16 | %31,2 | -0,346 (0,263) | -%3,3 |
+| Mart 2019 - Nisan 2020, saatlik | geri çekilme | 150 | %48,0 | +0,161 (0,108) | +%27,9 |
+| aynı | süpürme | 59 | %40,7 | -0,017 (0,166) | +%6,7 |
+| Ocak 2017 - Şubat 2018, saatlik | geri çekilme | 146 | %32,2 | -0,096 (0,096) | -%11,1 |
+| aynı | süpürme | 70 | %25,7 | -0,277 (0,157) | -%9,2 |
 
-Stop ve çıkış kuralları olmadan, sinyalden sonraki fiyat hareketine de bakıldı (olay çalışması):
+Hepsi varsayılan maliyetlerle (spread 1,2 pip, kayma, lot başına 7 USD komisyon) ve kurallar veri
+görülmeden önce yazıldığı haliyle; hiçbir parametre bu verilere göre ayarlanmadı.
 
-- **Geri çekilme sinyali:** sonraki 1-24 saatte sinyal yönünde ortalama hareket sıfır (176 sinyal).
-  Yani giriş kuralının öngörü gücü görünmüyor; kayıp maliyetlerden geliyor.
-- **Süpürme sinyali:** sonraki 4-12 saatte fiyat ortalamada sinyalin TERSİNE gitti (82 sinyal,
-  12 saatte -0,97 ATR, t = -2,1). Yön, seviye türü ve dönemin iki yarısı ayrı ayrı bakıldığında
-  hepsinde işaret aynı. Bu veride "fitilden sonra dönüş" yerine "kırılımın devamı" görülüyor.
+Geri çekilme kurulumunun 2019-20 M15 sonucunun sağlamlığı:
+
+- 14 ayın 9'unda pozitif. En iyi ay (Mart 2020) çıkarılınca +0,09R; en iyi 3 işlem çıkarılınca +0,05R.
+- Dönemin ilk yarısı +0,04R, ikinci yarısı +0,24R. Short işlemler +0,23R, long işlemler +0,06R.
+- Yeniden örnekleme (bootstrap): ortalama R'nin sıfırdan büyük olma olasılığı %91; %90 aralığı
+  [-0,03R, +0,32R]. Yani olumlu ama istatistiksel olarak kanıtlanmış değil.
 
 Okuma:
 
-- Örneklem sınırlı: tek parite, 13 ay, saatlik çubuk; hedef M15 ve dokuz enstrüman. 2017, EURUSD
-  için tek yönlü güçlü bir trend yılıydı. Kesin hüküm değil.
-- Yine de strateji lehine hiçbir kanıt yok, aleyhine zayıf kanıt var. Fitil bu kurallarla gerçek
-  parayla çalıştırılmamalı.
-- Süpürme sonucunu tersine çevirip "kırılım devamı" stratejisi yapmak cazip görünür ama aynı veriden
-  çıkarılmış bir kuraldır; bağımsız veride (başka pariteler, başka yıllar) sınanmadan kanıt sayılmaz.
-  Sıradaki araştırma adımı budur ve daha fazla gün içi veri gerektirir.
+- **Süpürme kurulumu** hiçbir dönemde kazandırmadı. 2017 verisinde sinyalden sonraki 4-12 saatte fiyat
+  ortalamada sinyalin tersine gitti. Bu yüzden varsayılan olarak kapalı; açmak için config'e
+  `"strategy": {"setups": ["sweep", "pullback"]}` yazılır.
+- **Geri çekilme kurulumu** döneme bağlı: 2019-20'de kazandırdı, 2017'de kaybettirdi. İki dönem
+  birleştirildiğinde saatlik çubukta ortalama sıfıra yakın. Umut verici ama güvenilir bir avantaj
+  olduğu gösterilmiş değil.
+- Eksik olan: başka pariteler, altın, petrol ve daha uzun dönem. Bunlar için M15 verisi gerekiyor.
+
+Bu istatistikler gerçek olsaydı ne anlama gelirdi (`fitil.plan` ile, 2019-20 M15 değerleri: kazanma
+%44, ortalama kazanç 1,33R, ortalama kayıp 0,80R, enstrüman başına günde 0,7 işlem):
+
+| Varsayım | 1000 dolarla haftalık çekim | Bir yıl sonra toplam (medyan) | Haftada 100 dolar için sermaye |
+|---|---|---|---|
+| Tek enstrüman | yaklaşık 1,4 dolar | yaklaşık 1.130 dolar | yaklaşık 71.000 dolar |
+| Beş bağımsız enstrüman | yaklaşık 7,4 dolar | yaklaşık 1.750 dolar | yaklaşık 13.600 dolar |
+
+İkinci satır, diğer enstrümanların da aynı sonucu vereceğini ve birbirinden bağımsız olacağını varsayar;
+ikisi de sınanmadı.
 
 ## Beklenti hesabı
 
@@ -180,8 +195,8 @@ ayarı ister. Emin olmak için MT5 Market Watch'taki saati UTC ile karşılaşt�
 
 ## Bilinen sınırlar
 
-- Strateji kuralları gerçek gün içi veride sınanmadı. `fitil.backtest` ile kendi verinizde sınamadan
-  ve demo hesapta izlemeden gerçek para kullanmayın.
+- Strateji yalnızca EURUSD'de, iki dönemde sınandı; diğer pariteler, altın ve petrol sınanmadı.
+  `fitil.backtest` ile kendi verinizde sınamadan ve demo hesapta izlemeden gerçek para kullanmayın.
 - MT5 bağlantısı gerçek terminalde çalıştırılmadı; ilk çalıştırmada hata çıkması olasıdır.
 
 - Bot kapalıyken yeni işlem açılmaz ve stoplar sürüklenmez; mevcut stoplar brokerda kalır.

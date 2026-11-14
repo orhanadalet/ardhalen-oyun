@@ -9,7 +9,9 @@ from pathlib import Path
 @dataclass
 class StrategyParams:
     bar_minutes: int = 15             # tetik zaman dilimi (dakika): 5, 15, 30 ya da 60
-    setups: tuple = ("sweep", "pullback")   # etkin kurulumlar; biri çıkarılarak ayrı ayrı sınanabilir
+    # Etkin kurulumlar. Süpürme ("sweep") varsayılan olarak KAPALI: iki bağımsız gerçek veri döneminde
+    # (EURUSD 2017 saatlik, 2019-20 M15) kazandırmadı. Sınamak için ("sweep", "pullback") yazılabilir.
+    setups: tuple = ("pullback",)
     atr_period: int = 14
     min_bars: int = 600               # değerlendirme için gereken en az M15 çubuğu
     h1_ema: int = 50                  # yön: H1 kapanışlarının EMA'sı
