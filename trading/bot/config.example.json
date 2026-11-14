@@ -1,0 +1,23 @@
+{
+  "symbols": {
+    "EURUSD": {"usd_beta": -1},
+    "GBPUSD": {"usd_beta": -1},
+    "AUDUSD": {"usd_beta": -1},
+    "NZDUSD": {"usd_beta": -1},
+    "USDJPY": {"usd_beta": 1},
+    "USDCHF": {"usd_beta": 1},
+    "USDCAD": {"usd_beta": 1},
+    "XAUUSD": {"usd_beta": -1},
+    "XTIUSD": {"usd_beta": 0}
+  },
+  "magic": 20261115,
+  "entry_hours": [7, 17],
+  "flat_hour": 20,
+  "blackouts": [],
+  "risk_tiers": {"1": 0.0025, "2": 0.005, "3": 0.01},
+  "max_portfolio_risk": 0.03,
+  "max_usd_net_risk": 0.02,
+  "daily_loss_limit": 0.03,
+  "max_trades_per_day": 20,
+  "max_positions": 5
+}
