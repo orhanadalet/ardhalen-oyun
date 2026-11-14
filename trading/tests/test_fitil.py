@@ -1,4 +1,5 @@
 """Çalıştırma:  cd trading && python -m unittest discover -s tests -v"""
+import json
 import sys
 import tempfile
 import types
@@ -11,7 +12,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bot"))
 
-from fitil.broker import PaperBroker, Pos, Spec, round_lots_down   # noqa: E402
+from fitil.broker import FatalError, PaperBroker, Pos, Spec, round_lots_down   # noqa: E402
 from fitil.config import Config, StrategyParams                    # noqa: E402
 from fitil.engine import Engine                                    # noqa: E402
 from fitil.mt5_broker import MT5Broker                             # noqa: E402
@@ -263,19 +264,26 @@ def fake_mt5(demo=True, server_offset_h=2):
         ACCOUNT_TRADE_MODE_DEMO=0, SYMBOL_TRADE_MODE_FULL=4, TIMEFRAME_M15=15, POSITION_TYPE_BUY=0,
         ORDER_TYPE_BUY=0, ORDER_TYPE_SELL=1, TRADE_ACTION_DEAL=1, TRADE_ACTION_SLTP=6, ORDER_TIME_GTC=0,
         ORDER_FILLING_FOK=0, ORDER_FILLING_IOC=1, ORDER_FILLING_RETURN=2, TRADE_RETCODE_DONE=10009,
-        sent=[], pos=[])
+        TRADE_RETCODE_DONE_PARTIAL=10010, TRADE_RETCODE_PLACED=10008,
+        sent=[], pos=[], retcode=10009, login=111, demo=demo, tick_age=0.0, calls=0, pos_error=False)
     import time as _t
+    t0 = _t.time()
     m.shutdown = lambda: None
     m.last_error = lambda: (0, "ok")
-    m.account_info = lambda: types.SimpleNamespace(trade_mode=0 if demo else 2, equity=5000.0, balance=5000.0,
-                                                   margin_free=4000.0, currency="USD")
+    m.account_info = lambda: types.SimpleNamespace(trade_mode=0 if m.demo else 2, equity=5000.0, balance=5000.0,
+                                                   margin_free=4000.0, currency="USD", login=m.login)
     m.symbol_info = lambda s: types.SimpleNamespace(digits=5, point=0.00001, volume_min=0.01, volume_step=0.01,
                                                     volume_max=50.0, trade_stops_level=10, trade_mode=4, filling_mode=2)
     m.symbol_select = lambda s, v: True
-    m.symbol_info_tick = lambda s: types.SimpleNamespace(bid=1.1000, ask=1.1001, time=_t.time() + server_offset_h * 3600)
+    def symbol_info_tick(s):
+        m.calls += 1                              # canlı piyasa: her çağrıda biraz daha yeni tick
+        if m.tick_age > 0:                        # piyasa kapalı: son tick sabit, akmıyor
+            return types.SimpleNamespace(bid=1.1000, ask=1.1001, time=t0 + server_offset_h * 3600 - m.tick_age)
+        return types.SimpleNamespace(bid=1.1000, ask=1.1001, time=_t.time() + server_offset_h * 3600 + m.calls * 1e-3)
+    m.symbol_info_tick = symbol_info_tick
     m.order_calc_profit = lambda typ, s, vol, a, b: (b - a) * 100_000 * vol * (1 if typ == 0 else -1)
     m.order_calc_margin = lambda typ, s, vol, price: vol * 1000.0
-    m.positions_get = lambda: tuple(m.pos)
+    m.positions_get = lambda: None if m.pos_error else tuple(m.pos)
     m.DEAL_TYPE_BALANCE = 2
     m.connected, m.inits, m.deals = True, 0, []
     m.terminal_info = lambda: types.SimpleNamespace(connected=m.connected, trade_allowed=True)
@@ -303,7 +311,7 @@ def fake_mt5(demo=True, server_offset_h=2):
             m.pos.append(types.SimpleNamespace(ticket=777, symbol=req["symbol"], type=req["type"], volume=req["volume"],
                                                price_open=req["price"], sl=req["sl"], magic=req["magic"],
                                                time=_t.time() + server_offset_h * 3600))
-        return types.SimpleNamespace(retcode=10009, order=555, price=req.get("price", 0.0), comment="done")
+        return types.SimpleNamespace(retcode=m.retcode, order=555, price=req.get("price", 0.0), comment="done")
     m.order_send = order_send
     return m
 
@@ -311,17 +319,17 @@ def fake_mt5(demo=True, server_offset_h=2):
 class MT5Adapter(unittest.TestCase):
     def test_refuses_real_account_by_default(self):
         with self.assertRaises(RuntimeError):
-            MT5Broker(cfg(), mt5=fake_mt5(demo=False))
-        MT5Broker(cfg(), allow_real=True, mt5=fake_mt5(demo=False))
+            MT5Broker(cfg(), sleep=lambda x: None, mt5=fake_mt5(demo=False))
+        MT5Broker(cfg(), allow_real=True, sleep=lambda x: None, mt5=fake_mt5(demo=False))
 
     def test_server_offset_detected_and_times_are_utc(self):
-        b = MT5Broker(cfg(), mt5=fake_mt5(server_offset_h=3))
+        b = MT5Broker(cfg(), sleep=lambda x: None, mt5=fake_mt5(server_offset_h=3))
         self.assertEqual(b._offset, timedelta(hours=3))
         self.assertLess(abs((b.tick("EURUSD").time - datetime.now(timezone.utc).replace(tzinfo=None)).total_seconds()), 5)
 
     def test_order_request_carries_stop_magic_and_filling(self):
         m = fake_mt5()
-        b = MT5Broker(cfg(), mt5=m)
+        b = MT5Broker(cfg(), sleep=lambda x: None, mt5=m)
         res = b.market_order("EURUSD", 1, 0.10, 1.0950, "fitil-sweep")
         self.assertTrue(res.ok)
         self.assertEqual(res.ticket, 777)
@@ -333,7 +341,7 @@ class MT5Adapter(unittest.TestCase):
 
     def test_loss_per_lot_and_close_request(self):
         m = fake_mt5()
-        b = MT5Broker(cfg(), mt5=m)
+        b = MT5Broker(cfg(), sleep=lambda x: None, mt5=m)
         self.assertAlmostEqual(b.loss_per_lot("EURUSD", 1, 1.1000, 1.0950), 500.0)
         self.assertEqual(b.loss_per_lot("EURUSD", 1, 1.1000, 1.1050), 0.0)
         self.assertEqual(b.loss_per_lot("EURUSD", 1, 1.1000, 0.0), float("inf"))
@@ -348,7 +356,7 @@ class MT5Adapter(unittest.TestCase):
 
     def test_heartbeat_reconnects(self):
         m = fake_mt5()
-        b = MT5Broker(cfg(), mt5=m)
+        b = MT5Broker(cfg(), sleep=lambda x: None, mt5=m)
         n = m.inits
         b.heartbeat()
         self.assertEqual(m.inits, n)                 # bağlıyken yeniden başlatmaz
@@ -357,7 +365,7 @@ class MT5Adapter(unittest.TestCase):
         self.assertEqual(m.inits, n + 1)
 
     def test_bars_are_closed_utc_bars(self):
-        b = MT5Broker(cfg(), mt5=fake_mt5(server_offset_h=3))
+        b = MT5Broker(cfg(), sleep=lambda x: None, mt5=fake_mt5(server_offset_h=3))
         df = b.bars("EURUSD", 50)
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         self.assertEqual(len(df), 50)
@@ -367,19 +375,23 @@ class MT5Adapter(unittest.TestCase):
     def test_net_flows_counts_only_balance_deals_after_since(self):
         import time as _t
         m = fake_mt5(server_offset_h=2)
-        b = MT5Broker(cfg(), mt5=m)
+        b = MT5Broker(cfg(), sleep=lambda x: None, mt5=m)
         srv = _t.time() + 2 * 3600
         m.deals = [types.SimpleNamespace(type=2, profit=-300.0, time=srv - 600),      # çekim, 10 dk önce
                    types.SimpleNamespace(type=2, profit=1000.0, time=srv - 7200),     # yatırma, 2 saat önce
                    types.SimpleNamespace(type=0, profit=55.0, time=srv - 300)]        # işlem kârı: akış değil
         now = datetime.now(timezone.utc).replace(tzinfo=None)
-        self.assertEqual(b.net_flows_since(now - timedelta(hours=1)), -300.0)
-        self.assertEqual(b.net_flows_since(now - timedelta(hours=3)), 700.0)
+        self.assertEqual(sum(a for _, a in b.flows_since(now - timedelta(hours=1))), -300.0)
+        self.assertEqual(sum(a for _, a in b.flows_since(now - timedelta(hours=3))), 700.0)
+        m.history_deals_get = lambda lo, hi: None
+        m.last_error = lambda: (-10004, "No IPC connection")
+        with self.assertRaises(RuntimeError):                # hata "akış yok" sayılmaz
+            b.flows_since(now - timedelta(hours=1))
 
     def test_engine_runs_against_mt5_adapter(self):
         m = fake_mt5()
         logs = []
-        e = Engine(MT5Broker(cfg(), mt5=m), cfg(settle_sec=0.0), log=logs.append)
+        e = Engine(MT5Broker(cfg(), sleep=lambda x: None, mt5=m), cfg(settle_sec=0.0), log=logs.append)
         e.step()
         e.step()
         self.assertFalse([x for x in logs if "HATA" in x])
@@ -512,6 +524,185 @@ class Backtest(unittest.TestCase):
     def test_symbol_kinds(self):
         self.assertEqual([bt.kind_of(s) for s in ("EURUSD", "USDJPY", "USDCAD", "XAUUSD.m", "USOIL", "XBRUSD", "GOLD")],
                          ["fx", "jpy", "fx_usd", "gold", "oil", "oil", "gold"])
+
+
+class ReviewFixes(unittest.TestCase):
+    """Bağımsız incelemede bulunan hataların geri gelmesini önleyen testler."""
+
+    def setUp(self):
+        self.df, self.pdl = with_sweep_low(m15())
+        self.logs = []
+
+    def test_deposit_with_fast_scans_is_not_double_counted(self):
+        b = at_end(self.df)
+        clock = [b.now()]
+        b.now = lambda: clock[0]
+        e = Engine(b, cfg(), log=self.logs.append, dry_run=True)
+        e.step()
+        clock[0] += timedelta(seconds=5)
+        b._flows.append((clock[0], 10_000.0))              # 10.000 yatırıldı
+        b.balance += 10_000.0
+        for _ in range(30):                                 # 5 sn aralıkla 30 tur
+            e.step()
+            clock[0] += timedelta(seconds=5)
+        self.assertAlmostEqual(e.state["peak_equity"], 20_000.0, delta=1.0)
+        self.assertEqual(e.risk_factor(b.account().equity), 1.0)
+        self.assertEqual(sum("AKIŞ" in x for x in self.logs), 1)
+
+    def test_late_visible_deposit_does_not_inflate_peak(self):
+        b = at_end(self.df)
+        clock = [b.now()]
+        b.now = lambda: clock[0]
+        e = Engine(b, cfg(), log=self.logs.append, dry_run=True)
+        e.step()
+        t_dep = clock[0] + timedelta(seconds=5)
+        b.balance += 10_000.0                               # özkaynak arttı ama kayıt henüz görünmüyor
+        for _ in range(4):
+            clock[0] += timedelta(seconds=5)
+            e.step()
+        self.assertAlmostEqual(e.state["peak_equity"], 10_000.0, delta=1.0)   # zirve bekletildi
+        b._flows.append((t_dep, 10_000.0))                  # kayıt 20 sn sonra göründü
+        clock[0] += timedelta(seconds=5)
+        e.step()
+        self.assertAlmostEqual(e.state["peak_equity"], 20_000.0, delta=1.0)
+        self.assertEqual(e.drawdown(b.account().equity), 0.0)
+
+    def test_failed_order_result_but_open_position_is_still_tracked(self):
+        b = at_end(self.df)
+        real = b.market_order
+
+        def lying(*a, **k):
+            r = real(*a, **k)
+            return type(r)(False, 0, 0.0, "10008 placed")   # emir "başarısız" döndü ama pozisyon açıldı
+        b.market_order = lying
+        e = Engine(b, cfg(), log=self.logs.append)
+        e.step()
+        self.assertEqual(len(b.positions()), 1)
+        self.assertEqual(e.state["trades_today"], 1)
+        self.assertIn(str(b.positions()[0].ticket), e.state["tickets"])
+
+    def test_position_read_error_is_not_treated_as_flat(self):
+        m = fake_mt5()
+        b = MT5Broker(cfg(), sleep=lambda x: None, mt5=m)
+        m.pos_error = True
+        with self.assertRaises(RuntimeError):
+            b.positions()
+        e = Engine(b, cfg(), log=self.logs.append)
+        e.state["tickets"]["777"] = {"entry": 1.1, "init_dist": 0.001}
+        with self.assertRaises(RuntimeError):
+            e.step()
+        self.assertIn("777", e.state["tickets"])            # durum silinmedi
+
+    def test_partial_and_placed_retcodes_count_as_success(self):
+        for code in (10010, 10008):
+            m = fake_mt5()
+            m.retcode = code
+            self.assertTrue(MT5Broker(cfg(), sleep=lambda x: None, mt5=m).market_order("EURUSD", 1, 0.1, 1.09, "t").ok)
+        m = fake_mt5()
+        m.retcode = 10006                                   # reddedildi
+        self.assertFalse(MT5Broker(cfg(), sleep=lambda x: None, mt5=m)._send({"action": 6}).ok)
+
+    def test_monday_uses_last_full_day_not_sunday_evening(self):
+        idx = pd.date_range("2024-03-07 00:00", "2024-03-11 09:00", freq="15min")   # Per..Pzt
+        idx = idx[(idx.weekday < 5) | ((idx.weekday == 6) & (idx.hour >= 22))]      # pazar yalnızca 22:00+
+        df = pd.DataFrame({"open": 1.1, "high": 1.1005, "low": 1.0995, "close": 1.1}, index=idx)
+        fri = df.index.normalize() == pd.Timestamp("2024-03-08")
+        sun = df.index.normalize() == pd.Timestamp("2024-03-10")
+        df.loc[fri, "high"], df.loc[fri, "low"] = 1.1050, 1.0950
+        df.loc[sun, "high"], df.loc[sun, "low"] = 1.1010, 1.0990
+        lv = liquidity_levels(df, StrategyParams())
+        self.assertEqual((lv["pdh"], lv["pdl"]), (1.1050, 1.0950))
+
+    def test_news_release_bar_itself_is_blocked(self):
+        rules = Config(symbols={"X": {"usd_beta": 0}}).recurring_blackouts
+        now = datetime(2024, 7, 5, 12, 45, 3)               # NFP 12:30 UTC; çubuk 12:30-12:45
+        self.assertIsNone(events.blocked(now, None, [], rules, 15))                 # eski davranış: kaçırırdı
+        self.assertEqual(events.blocked(now, None, [], rules, 15, since=datetime(2024, 7, 5, 12, 30)), "veri saati: NFP")
+        self.assertIsNone(events.blocked(datetime(2024, 7, 5, 13, 15, 3), None, [], rules, 15, since=datetime(2024, 7, 5, 13, 0)))
+
+    def test_position_carried_overnight_is_closed_next_morning(self):
+        b = at_end(self.df)
+        e = Engine(b, cfg(), log=self.logs.append)
+        e.step()
+        p = b.positions()[0]
+        p.open_time = p.open_time - timedelta(days=1)        # dün açılmış gibi
+        e.step()
+        self.assertEqual([x for x in b.positions() if x.ticket == p.ticket], [])
+        self.assertTrue(any("gece taşınmış" in x for x in self.logs))
+
+    def test_rejected_close_is_retried_once_a_minute_not_every_scan(self):
+        b = at_end(self.df)
+        clock = [b.now().replace(hour=20, minute=0)]
+        b.now = lambda: clock[0]
+        b.market_order("EURUSD", 1, 0.1, 1.0, "t")
+        calls = []
+        b.close = lambda p: calls.append(1) or type(b.market_order("EURUSD", 1, 0.0, 9.9, "x"))(False, message="red")
+        e = Engine(b, cfg(), log=self.logs.append)
+        for _ in range(13):                                  # 65 saniye
+            e.step()
+            clock[0] += timedelta(seconds=5)
+        self.assertEqual(len(calls), 2)
+
+    def test_block_reason_is_journaled_once(self):
+        b = at_end(self.df)
+        e = Engine(b, cfg(), log=self.logs.append)
+        e.state.update(day=b.now().strftime("%Y-%m-%d"), day_start_equity=10_000.0, peak_equity=13_000.0,
+                       flows_until=b.now().isoformat(), withdraw_base=13_000.0)
+        e.step()
+        hits = [x for x in self.logs if "ENGEL" in x]
+        self.assertEqual(len(hits), 1)
+        self.assertIn("düşüş freni", hits[0])
+
+    def test_state_file_is_atomic_and_corruption_is_survivable(self):
+        with tempfile.TemporaryDirectory() as d:
+            sp = Path(d) / "s.json"
+            sp.write_text("{bozuk", encoding="utf-8")
+            e = Engine(at_end(self.df), cfg(), state_path=sp, log=self.logs.append)
+            self.assertTrue((Path(d) / "s.bad").exists())
+            self.assertTrue(any("bozuk" in x for x in self.logs))
+            e.step()
+            self.assertEqual(json.loads(sp.read_text(encoding="utf-8"))["trades_today"], 1)
+            self.assertFalse((Path(d) / "s.tmp").exists())
+
+    def test_timezone_aware_blackout_is_normalised(self):
+        e = Engine(at_end(self.df), cfg(blackouts=["2024-03-13T08:30:00-04:00"]), log=self.logs.append)
+        self.assertEqual(e.entry_block(datetime(2024, 3, 13, 12, 35), 10_000, 0), "veri saati")
+
+    def test_server_time_zone_conversion_handles_dst(self):
+        c = cfg(server_time={"tz": "America/New_York", "plus_hours": 7})
+        b = MT5Broker(c, sleep=lambda x: None, mt5=fake_mt5())
+        ep = lambda s: (pd.Timestamp(s) - pd.Timestamp("1970-01-01")).total_seconds()
+        self.assertEqual(b._utc(ep("2024-01-15 10:00")), datetime(2024, 1, 15, 8, 0))    # kış: sunucu = UTC+2
+        self.assertEqual(b._utc(ep("2024-07-15 10:00")), datetime(2024, 7, 15, 7, 0))    # yaz: sunucu = UTC+3
+        idx = b._utc_index(pd.Series([ep("2024-03-08 10:00"), ep("2024-03-11 10:00")]))  # ABD yaz saati geçişi
+        self.assertEqual(list(idx), [pd.Timestamp("2024-03-08 08:00"), pd.Timestamp("2024-03-11 07:00")])
+
+    def test_stale_ticks_do_not_produce_an_offset(self):
+        m = fake_mt5()
+        m.tick_age = 1700.0                                  # piyasa kapalı: son tick 28 dk önce, akmıyor
+        with self.assertRaises(RuntimeError):
+            MT5Broker(cfg(), sleep=lambda x: None, mt5=m)
+        MT5Broker(cfg(server_utc_offset_hours=2), sleep=lambda x: None, mt5=m)      # elle ayarla başlar
+
+    def test_switching_to_real_account_stops_the_bot(self):
+        m = fake_mt5()
+        b = MT5Broker(cfg(), sleep=lambda x: None, mt5=m)
+        b.heartbeat()
+        m.demo = False
+        with self.assertRaises(FatalError):
+            b.heartbeat()
+        m.demo, m.login = True, 222
+        with self.assertRaises(FatalError):
+            b.heartbeat()
+
+    def test_paper_close_applies_slippage(self):
+        df = self.df
+        extra = df.iloc[[-1]].copy(); extra.index = extra.index + pd.Timedelta(minutes=15)
+        full = pd.concat([df, extra])
+        b = paper(full, start=full.index[-1], slippage={"EURUSD": 0.0001})
+        b.market_order("EURUSD", 1, 0.1, 1.0, "t")
+        p = b.positions()[0]
+        self.assertAlmostEqual(b.close(p).price, b.tick("EURUSD").bid - 0.0001)
 
 
 class Plan(unittest.TestCase):

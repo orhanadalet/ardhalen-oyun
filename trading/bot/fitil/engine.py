@@ -7,14 +7,15 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
 
 from . import events
-from .broker import BAR, Broker, Pos, round_lots_down
+from .broker import BAR, Broker, FatalError, Pos, round_lots_down
 from .config import Config
 from .strategy import Signal, atr, evaluate
 
@@ -28,16 +29,34 @@ class Engine:
         self.seen: dict[str, datetime] = {}
         self.state = {"day": "", "day_start_equity": 0.0, "peak_equity": 0.0, "trades_today": 0, "tickets": {},
                       "flows_until": "", "withdraw_base": 0.0, "withdraw_week": ""}
-        self._flow_check: datetime | None = None
         self._warned: set[str] = set()
         if self.state_path and self.state_path.exists():
-            self.state.update(json.loads(self.state_path.read_text(encoding="utf-8")))
-        self._blackouts = [datetime.fromisoformat(x) for x in cfg.blackouts]
+            try:
+                self.state.update(json.loads(self.state_path.read_text(encoding="utf-8")))
+            except (ValueError, OSError):
+                bad = self.state_path.with_suffix(".bad")
+                os.replace(self.state_path, bad)
+                self.log(f"UYARI: durum dosyası bozuk, {bad.name} olarak ayrıldı. Zirve ve gün başı özkaynak sıfırdan başlıyor.")
+        self._blackouts = []
+        for x in cfg.blackouts:
+            t = datetime.fromisoformat(x)
+            self._blackouts.append(t.astimezone(timezone.utc).replace(tzinfo=None) if t.tzinfo else t)
+        self._last_equity: float | None = None
+        self._hold_peak_until: datetime | None = None    # açıklanamayan özkaynak sıçraması: zirveyi bekleterek güncelle
+        self._last_block: dict[str, str | None] = {}
+        self._close_retry: dict[int, datetime] = {}
 
     # ------------------------------------------------------------------ durum
     def _save(self) -> None:
         if self.state_path:
-            self.state_path.write_text(json.dumps(self.state), encoding="utf-8")
+            tmp = self.state_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(self.state), encoding="utf-8")
+            os.replace(tmp, self.state_path)             # yarım yazılmış dosya kalmaz
+
+    def reset_peak(self, equity: float) -> None:
+        """Düşüş frenini sıfırlar: zirve = şimdiki özkaynak. Yalnızca kullanıcı isteğiyle çağrılır."""
+        self.state["peak_equity"] = equity
+        self._save()
 
     def _journal(self, now: datetime, event: str, symbol: str = "", **kw) -> None:
         self.log(f"{now:%Y-%m-%d %H:%M:%S} {event:10s} {symbol:10s} " + " ".join(f"{k}={v}" for k, v in kw.items()))
@@ -56,7 +75,7 @@ class Engine:
         if self.state["day"] != day:
             self.state.update(day=day, day_start_equity=equity, trades_today=0)
             changed = True
-        if equity > self.state["peak_equity"]:
+        if equity > self.state["peak_equity"] and not (self._hold_peak_until and now < self._hold_peak_until):
             self.state["peak_equity"] = equity
             changed = True
         if self.state["withdraw_base"] <= 0:
@@ -67,26 +86,35 @@ class Engine:
 
     def _apply_flows(self, now: datetime, equity: float) -> None:
         """Para yatırma/çekme özkaynağı değiştirir ama kâr/zarar değildir: zirve ve gün başı
-        özkaynağı aynı oranda ölçeklenir ki çekim, düşüş freni ya da günlük kayıp sayılmasın."""
-        if self._flow_check is not None and (now - self._flow_check).total_seconds() < 60:
-            return
-        self._flow_check = now
+        özkaynağı aynı oranda ölçeklenir ki çekim, düşüş freni ya da günlük kayıp sayılmasın.
+
+        Her turda, zirve güncellenmeden ÖNCE çalışır. Akış kaydı özkaynaktan geç görünürse diye,
+        açıklanamayan ani özkaynak sıçramasında zirve güncellemesi iki dakika bekletilir.
+        """
         if not self.state["flows_until"]:
             self.state["flows_until"] = now.isoformat()
             self._save()
-            return
-        flow = self.broker.net_flows_since(datetime.fromisoformat(self.state["flows_until"]))
-        self.state["flows_until"] = now.isoformat()
-        if flow:
+        since = datetime.fromisoformat(self.state["flows_until"])
+        flows = [(t, a) for t, a in self.broker.flows_since(since) if t > since and a]
+        if flows:
+            flow = sum(a for _, a in flows)
             before = equity - flow
-            if before > 0:
+            if before > 0 and equity > 0:
                 k = equity / before
                 self.state["peak_equity"] *= k
                 self.state["day_start_equity"] *= k
             if flow > 0:
                 self.state["withdraw_base"] += flow
+            self.state["flows_until"] = max(t for t, _ in flows).isoformat()   # saat farkından bağımsız: son işlenen kayıt
+            self._hold_peak_until = None
             self._journal(now, "AKIŞ", "", tutar=round(flow, 2), ozkaynak=round(equity, 2))
-        self._save()
+            self._save()
+        elif self._last_equity and self._last_equity > 0 and equity / self._last_equity - 1.0 > 0.03:
+            self._hold_peak_until = now + timedelta(minutes=2)
+        elif now - since > timedelta(hours=6):
+            self.state["flows_until"] = (now - timedelta(hours=1)).isoformat()
+            self._save()
+        self._last_equity = equity
 
     def _withdraw_hint(self, now: datetime, equity: float) -> None:
         """Haftada bir: önceki zirveyi aşan kârın withdraw_frac kadarını çekim önerisi olarak yazar."""
@@ -117,7 +145,8 @@ class Engine:
             return 0.0
         return 0.5 if dd >= self.cfg.dd_half_risk else 1.0
 
-    def entry_block(self, now: datetime, equity: float, n_positions: int, symbol: str | None = None) -> str | None:
+    def entry_block(self, now: datetime, equity: float, n_positions: int, symbol: str | None = None,
+                    since: datetime | None = None) -> str | None:
         """Yeni giriş yasaksa nedenini döndürür."""
         c = self.cfg
         if now.weekday() >= 5:
@@ -134,7 +163,7 @@ class Engine:
         if n_positions >= c.max_positions:
             return "azami pozisyon sayısı"
         group = c.symbols.get(symbol, {}).get("group") if symbol else None
-        return events.blocked(now, group, self._blackouts, c.recurring_blackouts, c.blackout_minutes)
+        return events.blocked(now, group, self._blackouts, c.recurring_blackouts, c.blackout_minutes, since)
 
     def _open_risk(self, positions: list[Pos]) -> tuple[float, float]:
         total = usd = 0.0
@@ -174,6 +203,13 @@ class Engine:
                 self._withdraw_hint(now, b.account().equity)
             return
 
+        # Gece taşınmış pozisyon (bot kapalıydı ya da kapanış reddedildi): ilk fırsatta kapat
+        carried = [p for p in positions if p.open_time.date() < now.date()]
+        for p in carried:
+            self._close(now, p, "gece taşınmış")
+        if carried and not self.dry_run:
+            positions = b.positions()
+
         for sym in c.symbols:
             last = b.last_bar_time(sym)
             if last is None or self.seen.get(sym) == last:
@@ -196,7 +232,12 @@ class Engine:
                 continue
             if (now - closed_at).total_seconds() > c.max_signal_age_sec:
                 continue                     # bot geç başladı: eski çubuğa girme
-            block = self.entry_block(now, acct.equity, len(positions), sym)
+            block = self.entry_block(now, acct.equity, len(positions), sym, since=last)
+            if block != self._last_block.get(sym):
+                self._last_block[sym] = block
+                if block not in (None, "seans dışı", "hafta sonu"):
+                    self._journal(now, "ENGEL", sym, neden=block, ozkaynak=round(acct.equity, 2),
+                                  dusus_yuzde=round(100 * self.drawdown(acct.equity), 1))
             if block:
                 continue
             tick = b.tick(sym)
@@ -246,13 +287,16 @@ class Engine:
             self._journal(now, "SİNYAL", sym, **info)
             return False
         res = b.market_order(sym, sig.direction, lots, sl, f"fitil-{sig.setup}")
-        if not res.ok:
+        # Emrin sonucuna değil brokerdaki gerçeğe bak: "başarısız" dönen emir de pozisyon açmış olabilir.
+        opened = [p for p in b.positions() if p.symbol == sym]
+        if not opened:
             self._journal(now, "RED", sym, mesaj=res.message, **info)
             return False
+        p = max(opened, key=lambda x: x.open_time)
         self.state["trades_today"] += 1
-        self.state["tickets"][str(res.ticket)] = {"entry": res.price, "init_dist": (res.price - sl) * sig.direction}
+        self.state["tickets"][str(p.ticket)] = {"entry": p.entry, "init_dist": (p.entry - sl) * sig.direction}
         self._save()
-        self._journal(now, "GİRİŞ", sym, ticket=res.ticket, dolum=res.price, **info)
+        self._journal(now, "GİRİŞ", sym, ticket=p.ticket, dolum=p.entry, emir=res.message, **info)
         return True
 
     # ------------------------------------------------------------------ yönetim
@@ -294,7 +338,14 @@ class Engine:
     def _close(self, now: datetime, p: Pos, why: str) -> None:
         if self.dry_run:
             return
+        retry = self._close_retry.get(p.ticket)
+        if retry and now < retry:
+            return                                    # reddedilen kapanışı dakikada bir yeniden dene
         res = self.broker.close(p)
+        if res.ok:
+            self._close_retry.pop(p.ticket, None)
+        else:
+            self._close_retry[p.ticket] = now + timedelta(seconds=60)
         self._journal(now, "ÇIKIŞ" if res.ok else "RED", p.symbol, ticket=p.ticket, neden=why,
                       fiyat=res.price, mesaj=res.message)
 
@@ -304,7 +355,7 @@ class Engine:
         while True:
             try:
                 self.step()
-            except KeyboardInterrupt:
+            except (KeyboardInterrupt, FatalError):
                 raise
             except Exception as e:                    # tek bir hata botu düşürmesin; stoplar brokerda
                 self.log(f"HATA: {type(e).__name__}: {e}")

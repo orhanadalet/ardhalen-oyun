@@ -58,10 +58,14 @@ class OrderResult:
     message: str = ""
 
 
+class FatalError(RuntimeError):
+    """Botun durması gereken durum (ör. hesap değişti, gerçek hesaba geçildi)."""
+
+
 class Broker(Protocol):
     def now(self) -> datetime: ...
     def heartbeat(self) -> None: ...                                    # bağlantıyı doğrula / yeniden kur
-    def net_flows_since(self, since: datetime) -> float: ...            # para yatırma (+) / çekme (-) toplamı
+    def flows_since(self, since: datetime) -> list[tuple[datetime, float]]: ...   # (UTC zaman, tutar): yatırma +, çekme -
     def account(self) -> Account: ...
     def spec(self, symbol: str) -> Spec: ...
     def tick(self, symbol: str) -> Tick | None: ...
@@ -156,9 +160,8 @@ class PaperBroker:
     def heartbeat(self) -> None:
         return None
 
-    def net_flows_since(self, since: datetime) -> float:
-        flow = sum(a for t, a in self._flows if t > since)
-        return flow
+    def flows_since(self, since: datetime) -> list[tuple[datetime, float]]:
+        return [(t, a) for t, a in self._flows if t > since]
 
     def deposit(self, amount: float) -> None:
         """Test için: para yatırma (+) ya da çekme (-)."""
@@ -221,7 +224,7 @@ class PaperBroker:
         if pos.ticket not in self._pos:
             return OrderResult(False, message="pozisyon yok")
         p = self._pos[pos.ticket]
-        price = self._exit_price(p)
+        price = self._exit_price(p) - p.direction * self.slippage.get(p.symbol, 0.0)
         self._settle(p, price, self.clock, "kapat")
         return OrderResult(True, p.ticket, price)
 

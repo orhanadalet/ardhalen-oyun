@@ -56,9 +56,15 @@ def liquidity_levels(df: pd.DataFrame, p: StrategyParams) -> dict[str, float]:
     day = t.normalize()
     levels: dict[str, float] = {}
     prev = df.loc[df.index < day]
-    if len(prev):
-        pday = prev.loc[prev.index >= prev.index[-1].normalize()]
-        levels["pdh"], levels["pdl"] = float(pday["high"].max()), float(pday["low"].min())
+    for _ in range(5):                       # son TAM işlem günü: pazar akşamının birkaç çubuğu sayılmaz
+        if not len(prev):
+            break
+        d0 = prev.index[-1].normalize()
+        pday = prev.loc[prev.index >= d0]
+        if len(pday) >= p.min_day_bars:
+            levels["pdh"], levels["pdl"] = float(pday["high"].max()), float(pday["low"].min())
+            break
+        prev = prev.loc[prev.index < d0]
     if t.hour >= p.asia_end_hour:
         asia = df.loc[(df.index >= day) & (df.index < day + pd.Timedelta(hours=p.asia_end_hour))]
         if len(asia) >= 8:

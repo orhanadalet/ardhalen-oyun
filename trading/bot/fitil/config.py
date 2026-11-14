@@ -13,6 +13,7 @@ class StrategyParams:
     h1_ema: int = 50                  # yön: H1 kapanışlarının EMA'sı
     h4_ema: int = 20                  # yön: H4 kapanışlarının EMA'sı
     asia_end_hour: int = 7            # UTC; Asya aralığı 00:00 - bu saat
+    min_day_bars: int = 40            # "önceki gün" sayılması için gereken en az M15 çubuğu (10 saat)
     sweep_fresh_bars: int = 4         # süpürmeden önce bu kadar çubuk seviyenin doğru tarafında kapanmış olmalı
     sweep_close_frac: float = 0.6     # süpürme çubuğu aralığının bu kadarını geri almış olmalı
     sweep_min_range_atr: float = 0.8
@@ -36,7 +37,10 @@ class Config:
     scan_interval_sec: float = 5.0    # yeni çubuk kontrolü ve pozisyon takibi
     settle_sec: float = 3.0           # çubuk kapanışından sonra bekleme
     max_signal_age_sec: float = 90.0  # bundan eski sinyale girilmez (bot geç başladıysa)
-    server_utc_offset_hours: float | None = None   # None: tick saatinden otomatik kestirilir
+    server_utc_offset_hours: float | None = None   # sabit fark; None: aşağıdaki ayar ya da otomatik
+    # Sunucu saati bir saat dilimine bağlıysa (çoğu broker: New York + 7 saat) burada tanımlayın;
+    # yaz saati geçişleri doğru hesaplanır:  {"tz": "America/New_York", "plus_hours": 7}
+    server_time: dict | None = None
     deviation_points: int = 30
 
     # Zaman (UTC)
@@ -108,3 +112,7 @@ class Config:
         for x in self.blackouts:
             datetime.fromisoformat(x)
         validate_rules(self.recurring_blackouts)
+        if self.server_time is not None:
+            from .events import _zone
+            _zone(self.server_time["tz"])
+            float(self.server_time.get("plus_hours", 0))

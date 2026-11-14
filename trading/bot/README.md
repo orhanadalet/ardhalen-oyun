@@ -93,7 +93,29 @@ python -m fitil.plan --equity 1000 --win-rate 0.42 --avg-win 1.5 --trades-per-da
 
 Girdiler sizin varsayımınızdır; araç bir tahmin değil, "bu istatistikler gerçekse" hesabıdır.
 
+## Düşüş freni devreye girerse
+
+Zirveden %20 düşüşte bot yeni giriş yapmayı bırakır ve günlüğe `ENGEL ... düşüş freni: sistem durdu`
+yazar. Bu durum kendiliğinden kalkmaz; amaç durup nedenini incelemektir. İnceledikten sonra
+`python -m fitil --config config.json --reset-peak` ile zirveyi şimdiki özkaynağa çekip devam edebilirsiniz.
+
+## Sunucu saati
+
+MT5 zamanları broker sunucu saatindedir, bot UTC kullanır. En sağlam ayar, sunucunun saat dilimini
+tanımlamaktır. Çoğu broker "New York + 7 saat" kullanır (kışın UTC+2, yazın UTC+3):
+
+```
+"server_time": {"tz": "America/New_York", "plus_hours": 7}
+```
+
+Bu ayar yoksa fark, piyasa açıkken canlı fiyat akışından kestirilir; piyasa kapalıyken bot başlamaz ve
+ayarı ister. Emin olmak için MT5 Market Watch'taki saati UTC ile karşılaştırın.
+
 ## Bilinen sınırlar
+
+- Strateji kuralları gerçek gün içi veride sınanmadı. `fitil.backtest` ile kendi verinizde sınamadan
+  ve demo hesapta izlemeden gerçek para kullanmayın.
+- MT5 bağlantısı gerçek terminalde çalıştırılmadı; ilk çalıştırmada hata çıkması olasıdır.
 
 - Bot kapalıyken yeni işlem açılmaz ve stoplar sürüklenmez; mevcut stoplar brokerda kalır.
 - Sunucu saat farkı tick saatinden kestirilir. Piyasa kapalıyken başlatırsanız

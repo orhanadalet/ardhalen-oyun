@@ -1,8 +1,14 @@
 """MetaTrader 5 bağdaştırıcısı. Yalnızca Windows'ta, MT5 terminali açıkken çalışır.
 
-Kurulum:  pip install MetaTrader5 pandas numpy
+Kurulum:  pip install -r requirements.txt
 DURUM: bu dosya gerçek bir terminale karşı ÇALIŞTIRILMADI; yalnızca sahte bir MetaTrader5
-modülüyle istek yapısı test edildi. İlk çalıştırma mutlaka demo hesapta ve --dry-run ile olmalı.
+modülüyle istek yapısı test edildi. İlk çalıştırma mutlaka demo hesapta ve --trade olmadan olmalı.
+
+Zaman: MT5 tüm zaman damgalarını broker SUNUCU saatinde verir. Motor ise UTC kullanır.
+Çeviri üç yoldan biriyle yapılır (öncelik sırasıyla):
+  1) config.server_time = {"tz": "America/New_York", "plus_hours": 7}  -> yaz saati dahil doğru
+  2) config.server_utc_offset_hours = 2                                 -> sabit fark
+  3) otomatik: piyasa açıkken canlı tick saatinden kestirilir
 """
 from __future__ import annotations
 
@@ -10,84 +16,146 @@ import calendar
 import time
 from datetime import datetime, timedelta, timezone
 
+import numpy as np
 import pandas as pd
 
-from .broker import Account, OrderResult, Pos, Spec, Tick
+from .broker import Account, FatalError, OrderResult, Pos, Spec, Tick
 from .config import Config
+
+EPOCH = datetime(1970, 1, 1)
 
 
 class MT5Broker:
-    def __init__(self, cfg: Config, allow_real: bool = False, mt5=None):
+    def __init__(self, cfg: Config, allow_real: bool = False, mt5=None, sleep=time.sleep):
         if mt5 is None:
             import MetaTrader5 as mt5          # noqa: N813  (yalnızca Windows)
-        self.mt5, self.cfg = mt5, cfg
+        self.mt5, self.cfg, self.allow_real, self._sleep = mt5, cfg, allow_real, sleep
         if not mt5.initialize():
             raise RuntimeError(f"MT5 başlatılamadı: {mt5.last_error()}")
         info = mt5.account_info()
         if info is None:
             raise RuntimeError("Hesap bilgisi alınamadı: MT5 terminalinde hesaba giriş yapın")
+        self._login = info.login
         self._demo = info.trade_mode == mt5.ACCOUNT_TRADE_MODE_DEMO
         if not self._demo and not allow_real:
-            raise RuntimeError("Bu bir DEMO hesap değil. Gerçek hesap için --allow-real gerekir.")
+            raise FatalError("Bu bir DEMO hesap değil. Gerçek hesap için --allow-real gerekir.")
         for sym in cfg.symbols:
             if mt5.symbol_info(sym) is None or not mt5.symbol_select(sym, True):
                 raise RuntimeError(f"Sembol bulunamadı: {sym} (Market Watch'taki tam adı yazın)")
-        self._offset = self._server_offset()
+        self._zone = None
+        self._plus = timedelta(0)
+        self._offset = timedelta(0)
         self._offset_at = time.time()
+        self._newest_tick = 0.0
+        if cfg.server_time is not None:
+            from .events import _zone
+            self._zone = _zone(cfg.server_time["tz"])
+            self._plus = timedelta(hours=float(cfg.server_time.get("plus_hours", 0)))
+        elif cfg.server_utc_offset_hours is not None:
+            self._offset = timedelta(hours=cfg.server_utc_offset_hours)
+        else:
+            first = self._newest_tick_time()
+            self._sleep(3.0)
+            second = self._newest_tick_time()
+            if second <= first:
+                raise RuntimeError("Sunucu saat farkı kestirilemedi: fiyat akmıyor (piyasa kapalı olabilir). "
+                                   "Yapılandırmaya server_time ya da server_utc_offset_hours yazın.")
+            self._offset = self._offset_from(second)
+            self._newest_tick = second
 
-    # --- sunucu saati ---
-    def _server_offset(self) -> timedelta:
-        """Sunucu saati - UTC. MT5 zaman damgaları sunucu saatindedir."""
-        if self.cfg.server_utc_offset_hours is not None:
-            return timedelta(hours=self.cfg.server_utc_offset_hours)
-        newest = max((t.time for t in (self.mt5.symbol_info_tick(s) for s in self.cfg.symbols) if t), default=0)
-        diff = newest - time.time()
-        if newest == 0 or abs(diff - round(diff / 1800) * 1800) > 300:
-            raise RuntimeError("Sunucu saat farkı kestirilemedi (piyasa kapalı olabilir). "
-                               "Yapılandırmaya server_utc_offset_hours yazın.")
-        return timedelta(seconds=round(diff / 1800) * 1800)
+    # ------------------------------------------------------------------ sunucu saati
+    def _newest_tick_time(self) -> float:
+        ticks = (self.mt5.symbol_info_tick(s) for s in self.cfg.symbols)
+        return max((float(t.time) for t in ticks if t is not None), default=0.0)
+
+    def _offset_from(self, live_tick_time: float) -> timedelta:
+        """Canlı (az önce gelmiş) bir tick'in sunucu saatinden sunucu-UTC farkı. 30 dakikaya yuvarlanır."""
+        diff = live_tick_time - time.time()
+        snapped = round(diff / 1800) * 1800
+        if abs(diff - snapped) > 120 or not -12 * 3600 <= snapped <= 14 * 3600:
+            raise RuntimeError(f"Sunucu saat farkı tutarsız ({diff:.0f} sn). "
+                               "Yapılandırmaya server_time ya da server_utc_offset_hours yazın.")
+        return timedelta(seconds=snapped)
 
     def _utc(self, server_epoch: float) -> datetime:
-        return datetime.fromtimestamp(server_epoch, timezone.utc).replace(tzinfo=None) - self._offset
+        naive = EPOCH + timedelta(seconds=float(server_epoch))
+        if self._zone is None:
+            return naive - self._offset
+        local = (naive - self._plus).replace(tzinfo=self._zone)
+        return local.astimezone(timezone.utc).replace(tzinfo=None)
 
-    # --- Broker arayüzü ---
+    def _utc_index(self, server_epochs) -> pd.DatetimeIndex:
+        idx = pd.DatetimeIndex(pd.to_datetime(np.asarray(server_epochs, dtype="float64"), unit="s"))
+        if self._zone is None:
+            return idx - self._offset
+        local = (idx - self._plus).tz_localize(self._zone, ambiguous=True, nonexistent="shift_forward")
+        return local.tz_convert("UTC").tz_localize(None)
+
+    def _server_epoch(self, utc: datetime) -> int:
+        """UTC -> yaklaşık sunucu epoch'u (yalnızca geçmiş sorgusu aralığı için; geniş pay bırakılır)."""
+        return calendar.timegm(utc.timetuple())
+
+    # ------------------------------------------------------------------ bağlantı
     def heartbeat(self) -> None:
-        """Terminal bağlantısını doğrular; koptuysa yeniden kurar. Saat farkını saatte bir yeniler (yaz saati)."""
+        """Bağlantıyı ve hesabı doğrular; koptuysa yeniden kurar; otomatik saat farkını canlı tick ile yeniler."""
         ti = self.mt5.terminal_info()
         if ti is None or not ti.connected:
             self.mt5.shutdown()
             if not self.mt5.initialize():
                 raise RuntimeError(f"MT5 bağlantısı yok: {self.mt5.last_error()}")
-            if self.mt5.terminal_info() is None or not self.mt5.terminal_info().connected:
+            ti = self.mt5.terminal_info()
+            if ti is None or not ti.connected:
                 raise RuntimeError("MT5 terminali sunucuya bağlı değil")
-        if time.time() - self._offset_at > 3600 and self.cfg.server_utc_offset_hours is None:
-            self._offset_at = time.time()
-            try:
-                self._offset = self._server_offset()
-            except RuntimeError:
-                pass                                   # piyasa kapalı: eski değer kalır
+        info = self.mt5.account_info()
+        if info is None:
+            raise RuntimeError("Hesap bilgisi alınamadı")
+        if info.login != self._login:
+            raise FatalError("MT5'te hesap değişti. Fitil durduruluyor; yeniden başlatın.")
+        self._demo = info.trade_mode == self.mt5.ACCOUNT_TRADE_MODE_DEMO
+        if not self._demo and not self.allow_real:
+            raise FatalError("Hesap artık DEMO değil. Fitil durduruluyor.")
+        if self._zone is None and self.cfg.server_utc_offset_hours is None:
+            newest = self._newest_tick_time()
+            live = newest > self._newest_tick                 # son turdan beri yeni tick geldi: fiyat akıyor
+            self._newest_tick = max(newest, self._newest_tick)
+            if live and time.time() - self._offset_at > 3600:
+                self._offset_at = time.time()
+                try:
+                    self._offset = self._offset_from(newest)
+                except RuntimeError:
+                    pass                                      # eski değer kalır
 
     def trading_enabled(self) -> bool:
         ti = self.mt5.terminal_info()
         return bool(ti is not None and ti.trade_allowed)
 
-    def net_flows_since(self, since: datetime) -> float:
-        """since (UTC) sonrasındaki para yatırma/çekme toplamı (hesap para biriminde)."""
-        lo = calendar.timegm(since.timetuple()) - 2 * 86400
+    def flows_since(self, since: datetime) -> list[tuple[datetime, float]]:
+        """since (UTC) sonrasındaki para yatırma (+) / çekme (-) kayıtları."""
+        lo = self._server_epoch(since) - 2 * 86400
         hi = int(time.time()) + 2 * 86400
-        deals = self.mt5.history_deals_get(lo, hi) or ()
-        return float(sum(d.profit for d in deals
-                         if d.type == self.mt5.DEAL_TYPE_BALANCE and self._utc(d.time) > since))
+        deals = self.mt5.history_deals_get(lo, hi)
+        if deals is None:
+            code = self.mt5.last_error()
+            if code and code[0] < 0:                         # negatif kod = hata; boş geçmiş de None dönebilir
+                raise RuntimeError(f"İşlem geçmişi okunamadı: {code}")
+            return []
+        out = [(self._utc(d.time), float(d.profit)) for d in deals if d.type == self.mt5.DEAL_TYPE_BALANCE]
+        return [(t, a) for t, a in out if t > since]
 
+    # ------------------------------------------------------------------ Broker arayüzü
     def now(self) -> datetime:
         return datetime.now(timezone.utc).replace(tzinfo=None)
 
     def account(self) -> Account:
         a = self.mt5.account_info()
+        if a is None:
+            raise RuntimeError("Hesap bilgisi alınamadı")
         return Account(a.equity, a.balance, a.margin_free, a.currency, self._demo)
 
     def spec(self, symbol: str) -> Spec:
         s = self.mt5.symbol_info(symbol)
+        if s is None:
+            raise RuntimeError(f"Sembol bilgisi alınamadı: {symbol}")
         return Spec(symbol, s.digits, s.point, s.volume_min, s.volume_step, s.volume_max,
                     s.trade_stops_level * s.point, s.trade_mode == self.mt5.SYMBOL_TRADE_MODE_FULL)
 
@@ -109,13 +177,17 @@ class MT5Broker:
         if r is None or len(r) == 0:
             return pd.DataFrame(columns=["open", "high", "low", "close"])
         df = pd.DataFrame(r)[["time", "open", "high", "low", "close"]]
-        df.index = pd.to_datetime(df.pop("time"), unit="s") - self._offset
+        df.index = self._utc_index(df.pop("time"))
         df.index.name = "time"
-        return df
+        return df[~df.index.duplicated(keep="last")]
 
     def positions(self) -> list[Pos]:
+        raw = self.mt5.positions_get()
+        if raw is None:
+            # Hata "pozisyon yok" sayılmaz: sayılırsa sınırlar sıfır risk görür ve ikinci pozisyon açılabilir.
+            raise RuntimeError(f"Pozisyonlar okunamadı: {self.mt5.last_error()}")
         out = []
-        for p in self.mt5.positions_get() or ():
+        for p in raw:
             if p.magic != self.cfg.magic:
                 continue
             direction = 1 if p.type == self.mt5.POSITION_TYPE_BUY else -1
@@ -129,13 +201,17 @@ class MT5Broker:
         if sl <= 0:
             return float("inf")              # stopsuz pozisyon: sınırsız risk say
         profit = self.mt5.order_calc_profit(self._order_type(direction), symbol, 1.0, entry, sl)
-        return 0.0 if profit is None else max(0.0, -profit)
+        if profit is None:
+            raise RuntimeError(f"Risk hesaplanamadı: {symbol} {self.mt5.last_error()}")
+        return max(0.0, -profit)
 
     def margin_ok(self, symbol: str, direction: int, lots: float) -> bool:
         t = self.mt5.symbol_info_tick(symbol)
-        price = t.ask if direction > 0 else t.bid
-        need = self.mt5.order_calc_margin(self._order_type(direction), symbol, lots, price)
-        return need is not None and need <= self.mt5.account_info().margin_free
+        a = self.mt5.account_info()
+        if t is None or a is None:
+            return False
+        need = self.mt5.order_calc_margin(self._order_type(direction), symbol, lots, t.ask if direction > 0 else t.bid)
+        return need is not None and need <= a.margin_free
 
     def _filling(self, symbol: str):
         mode = self.mt5.symbol_info(symbol).filling_mode
@@ -149,13 +225,16 @@ class MT5Broker:
         res = self.mt5.order_send(request)
         if res is None:
             return OrderResult(False, message=str(self.mt5.last_error()))
-        ok = res.retcode == self.mt5.TRADE_RETCODE_DONE
+        ok = res.retcode in (self.mt5.TRADE_RETCODE_DONE, self.mt5.TRADE_RETCODE_DONE_PARTIAL,
+                             self.mt5.TRADE_RETCODE_PLACED)
         return OrderResult(ok, getattr(res, "order", 0), getattr(res, "price", 0.0), f"{res.retcode} {res.comment}")
 
     def market_order(self, symbol: str, direction: int, lots: float, sl: float, comment: str) -> OrderResult:
         if sl <= 0:
             return OrderResult(False, message="stop-loss olmadan emir gönderilmez")
         t = self.mt5.symbol_info_tick(symbol)
+        if t is None:
+            return OrderResult(False, message="fiyat yok")
         res = self._send({
             "action": self.mt5.TRADE_ACTION_DEAL, "symbol": symbol, "volume": lots,
             "type": self._order_type(direction), "price": t.ask if direction > 0 else t.bid,
@@ -164,11 +243,13 @@ class MT5Broker:
         })
         if not res.ok:
             return res
-        mine = [p for p in self.positions() if p.symbol == symbol]
-        if not mine:
-            return OrderResult(False, message="emir kabul edildi ama pozisyon bulunamadı")
-        p = max(mine, key=lambda x: x.open_time)
-        return OrderResult(True, p.ticket, p.entry, res.message)
+        for _ in range(5):                   # pozisyon listesi emirden biraz geç güncellenebilir
+            mine = [p for p in self.positions() if p.symbol == symbol]
+            if mine:
+                p = max(mine, key=lambda x: x.open_time)
+                return OrderResult(True, p.ticket, p.entry, res.message)
+            self._sleep(0.3)
+        return OrderResult(False, message=f"emir kabul edildi ama pozisyon henüz görünmüyor ({res.message})")
 
     def modify_sl(self, pos: Pos, sl: float) -> bool:
         return self._send({"action": self.mt5.TRADE_ACTION_SLTP, "symbol": pos.symbol,
@@ -176,6 +257,8 @@ class MT5Broker:
 
     def close(self, pos: Pos) -> OrderResult:
         t = self.mt5.symbol_info_tick(pos.symbol)
+        if t is None:
+            return OrderResult(False, message="fiyat yok")
         return self._send({
             "action": self.mt5.TRADE_ACTION_DEAL, "symbol": pos.symbol, "volume": pos.lots,
             "type": self._order_type(-pos.direction), "position": pos.ticket,

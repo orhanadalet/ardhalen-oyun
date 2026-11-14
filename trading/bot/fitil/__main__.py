@@ -9,6 +9,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from .broker import FatalError
 from .config import Config
 from .engine import Engine
 
@@ -35,6 +36,8 @@ def main() -> None:
     ap.add_argument("--trade", action="store_true", help="emir gönder (yoksa yalnızca sinyal yazar)")
     ap.add_argument("--allow-real", action="store_true", help="gerçek hesapta çalışmaya izin ver")
     ap.add_argument("--workdir", default=".", help="durum ve günlük dosyalarının klasörü")
+    ap.add_argument("--reset-peak", action="store_true",
+                    help="düşüş frenini sıfırla (zirve = şimdiki özkaynak). %%20 durmasından sonra, nedeni inceledikten sonra kullanın")
     a = ap.parse_args()
 
     cfg = Config.load(a.config)
@@ -51,10 +54,15 @@ def main() -> None:
     print(f"Hesap: {'DEMO' if acct.is_demo else 'GERÇEK'}  özkaynak={acct.equity:.2f} {acct.currency}  mod: {mode}")
     engine = Engine(broker, cfg, state_path=work / "fitil_state.json", journal_path=work / "fitil_journal.csv",
                     dry_run=not a.trade)
+    if a.reset_peak:
+        engine.reset_peak(acct.equity)
+        print(f"Düşüş freni sıfırlandı: zirve = {acct.equity:.2f}")
     try:
         engine.run()
     except KeyboardInterrupt:
         print("Durduruldu. Açık pozisyonlar ve stopları brokerda duruyor.")
+    except FatalError as e:
+        print(f"FİTİL DURDU: {e}\nAçık pozisyonlar ve stopları brokerda duruyor.")
     finally:
         broker.shutdown()
 

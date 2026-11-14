@@ -40,11 +40,20 @@ def rule_time_utc(rule: dict, day: date) -> datetime | None:
     return local.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-def blocked(now: datetime, group: str | None, fixed: list[datetime], rules: list[dict], minutes: int) -> str | None:
-    """now (UTC) bir yasak penceresindeyse olayın adını döndürür."""
-    window = minutes * 60
+def blocked(now: datetime, group: str | None, fixed: list[datetime], rules: list[dict], minutes: int,
+            since: datetime | None = None) -> str | None:
+    """[since, now] aralığı (UTC) bir olayın +/- minutes penceresine değiyorsa olayın adını döndürür.
+
+    since, değerlendirilen çubuğun açılış zamanıdır: veri o çubuğun içinde açıklandıysa
+    çubuk kapanışındaki sinyal de yasaktır (haber fitili süpürme sinyaline benzer).
+    """
+    w = timedelta(minutes=minutes)
+    lo, hi = (since or now) - w, now + w
+
+    def hit(t: datetime) -> bool:
+        return lo <= t <= hi
     for t in fixed:
-        if abs((now - t).total_seconds()) <= window:
+        if hit(t):
             return "veri saati"
     for r in rules:
         groups = r.get("groups")
@@ -52,6 +61,6 @@ def blocked(now: datetime, group: str | None, fixed: list[datetime], rules: list
             continue
         for d in (now.date() - timedelta(days=1), now.date(), now.date() + timedelta(days=1)):
             t = rule_time_utc(r, d)
-            if t is not None and abs((now - t).total_seconds()) <= window:
+            if t is not None and hit(t):
                 return f"veri saati: {r.get('name', '?')}"
     return None
