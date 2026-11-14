@@ -12,12 +12,24 @@ Kök dizindeki oyun dosyalarına (`index.html`, `haberler.json`, `surum.json`, `
 
 ```
 trading/
-  mql5/Experts/     EA kaynakları (.mq5)
-  mql5/Include/     ortak kütüphaneler (.mqh): risk, emir, filtreler
-  research/         Python ile veri analizi ve strateji prototipi
-  tests/            Python tarafının testleri
-  reports/          Strategy Tester raporları (kullanıcı dışa aktarır)
+  mql5/Experts/ArdhalenPortfolioTrend.mq5   çok sembollü portföy EA'sı
+  mql5/Include/Ardhalen/                    Signals.mqh, Risk.mqh
+  research/fxlab/                           Python backtest motoru (maliyet, portföy sınırı, walk-forward)
+  tests/                                    python -m unittest discover -s tests  (trading/ içinden)
+  data/                                     kullanıcının MT5'ten aktardığı <SEMBOL>.csv dosyaları (depoya girmez)
+  README.md                                 kurulum ve kullanım adımları
 ```
+
+## Tek doğruluk kaynağı
+
+Strateji kuralları iki yerde uygulanır: `research/fxlab/` (Python) ve `mql5/` (EA).
+Bir kuralı değiştirirken **ikisini birlikte** değiştir ve Python testlerini çalıştır.
+`Signals.mqh` içindeki tarama mantığının Python tanımıyla eşdeğerliği
+`test_mql5_stateless_scan_matches_python_state` testiyle korunur.
+
+Bu ortamdan piyasa verisi kaynaklarına erişim yoktur. Gerçek veri kullanıcıdan gelir
+(`trading/data/`). Sentetik veriyle alınan sonuçlar yalnızca kodun çalıştığını gösterir;
+performans kanıtı olarak sunma.
 
 ## Ortamın sınırları (önce bunu bil)
 
