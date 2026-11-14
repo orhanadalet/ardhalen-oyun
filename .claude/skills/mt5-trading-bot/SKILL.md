@@ -83,10 +83,15 @@ trading/
 
 ## İki sistem
 
-- **Gün içi bot (`bot/fitil`, asıl hedef):** M15 tarama, likidite süpürmesi + trend geri
-  çekilmesi, gün sonunda düz. Canlı tarafı Python `MetaTrader5` paketiyle kullanıcının
-  Windows'unda çalışır; burada `PaperBroker` ile test edilir. Strateji mantığı yalnızca
-  `strategy.py` içindedir; canlı ve simülasyon aynı kodu kullanır.
+- **Fitil (`bot/fitil`, asıl hedef):** M15 gün içi Python botu. Likidite süpürmesi + trend geri
+  çekilmesi, kanaat kademeli risk, gün sonunda düz. Canlı tarafı Python `MetaTrader5` paketiyle
+  kullanıcının Windows'unda çalışır; burada `PaperBroker` ile test edilir.
+  - Strateji mantığı yalnızca `strategy.py` içindedir; canlı, simülasyon ve backtest aynı kodu kullanır.
+  - `python -m fitil.backtest`: kullanıcının M15/M1 verisinde aynı motoru çalıştırır, döküm raporu verir.
+  - `python -m fitil.plan`: verilen kazanma oranı/ortalama R ile risk kuralları altında bir yılı simüle eder.
+  - Kural değişikliğinde `tests/test_fitil.py` çalıştırılır; para ve emirle ilgili her davranışın testi olmalı.
+  - `mt5_broker.py` gerçek terminalde çalıştırılmadı; kullanıcı ilk çalıştırmada hata bildirirse
+    önce orayı şüpheli say.
 - **Günlük trend portföyü (`research/fxlab` + `mql5/`):** FRED günlük verisinde 2000-2026
   maliyet sonrası kâr etmedi (bkz. `README.md`). Canlıya alınmaz; motoru araştırma için durur.
 
