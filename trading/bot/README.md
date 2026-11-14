@@ -93,6 +93,24 @@ python -m fitil.plan --equity 1000 --win-rate 0.42 --avg-win 1.5 --trades-per-da
 
 Girdiler sizin varsayımınızdır; araç bir tahmin değil, "bu istatistikler gerçekse" hesabıdır.
 
+## İlk çalıştırma kontrol listesi
+
+1. `python -m fitil --config config.json` (emir göndermez). Açılışta "Hesap: DEMO" yazmalı.
+2. Hata çıkarsa mesajı aynen saklayın; MT5 bağlantısı gerçek terminalde ilk kez çalışıyor olacak.
+3. Birkaç saat çalıştırın. `fitil_journal.csv` içinde `SİNYAL` satırlarının saatini MT5 grafiğindeki
+   M15 çubuklarıyla karşılaştırın: sinyal, grafikte gördüğünüz çubuğun kapanışına denk gelmeli.
+   Bir saat kayma varsa `server_time` ayarı yanlıştır.
+4. Sinyaller mantıklıysa `--trade` ile demo hesapta emir göndermeye geçin. İlk işlemlerde lotu,
+   stop fiyatını ve `risk_yuzde` değerini elle doğrulayın.
+5. En az birkaç hafta demo. Sonuçları `fitil.plan` ile değerlendirin.
+
+## Simülatörün doğrulanması
+
+Yönü olmayan rastgele veride hiçbir strateji maliyet öncesi kazanamaz. Simülatör bu testten geçti:
+136 farklı rastgele seride, sıfır maliyetle 8.816 işlemin ortalaması -0,02R (standart hata 0,015).
+Yani simülatörde ileriye bakma yok. Bu, stratejinin gerçek piyasada kazandığını göstermez; yalnızca
+backtest aracının kendiliğinden kâr üretmediğini gösterir.
+
 ## Düşüş freni devreye girerse
 
 Zirveden %20 düşüşte bot yeni giriş yapmayı bırakır ve günlüğe `ENGEL ... düşüş freni: sistem durdu`
