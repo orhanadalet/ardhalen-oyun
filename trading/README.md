@@ -1,10 +1,18 @@
-# Ardhalen Trading: MT5 portföy botu
+# Ardhalen Trading
 
-Forex major pariteler, altın ve petrol için çok sembollü trend takip sistemi.
-Oyun sitesinden bağımsızdır; yalnızca bu klasörde yaşar.
+Forex major pariteler, altın ve petrol için işlem altyapısı. Oyun sitesinden bağımsızdır;
+yalnızca bu klasörde yaşar. İki ayrı sistem içerir:
 
-**Durum:** Python araştırma tarafı test edildi. MQL5 kodu yazıldı ama henüz derlenmedi
-ve hiçbir gerçek piyasa verisinde sınanmadı. Stratejinin kâr ettiğine dair kanıt yoktur.
+| Sistem | Yer | Durum |
+|---|---|---|
+| **Fitil**: M15 gün içi Python botu | `bot/` (bkz. `bot/README.md`) | Asıl hedef. Mantığı simüle brokerla test edildi; MT5 bağlantısı ve strateji gerçek veride sınanmadı. |
+| Günlük trend portföyü | `research/fxlab/`, `mql5/` | Gerçek günlük veride maliyet sonrası kâr etmedi (aşağıda). Canlıya alınmaz. |
+
+Testler: `cd trading && python -m unittest discover -s tests`
+
+---
+
+# Günlük trend portföyü (arşiv)
 
 ## İlk gerçek veri sonucu (Kasım 2026)
 

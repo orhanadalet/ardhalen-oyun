@@ -37,7 +37,7 @@ Küçük hesaplar için cent hesap gerekir.
 ## Kurulum (Windows)
 
 1. MT5 terminalini açın, **demo** hesaba giriş yapın, "Algo Trading" düğmesini etkinleştirin.
-2. Python 3.10+ kurun, sonra: `pip install MetaTrader5 pandas numpy`
+2. Python 3.10+ kurun, sonra bu klasörde: `pip install -r requirements.txt`
 3. `config.example.json` dosyasını `config.json` olarak kopyalayın. `symbols` altındaki adları
    Market Watch'taki tam adlarla değiştirin (ör. `XAUUSD.m`, `USOIL`).
 4. Yüksek etkili veri saatlerini (NFP, FOMC, CPI, EIA) `blackouts` listesine UTC olarak yazın:
@@ -51,8 +51,47 @@ python -m fitil --config config.json --trade    # demo hesapta emir gönderir
 
 Gerçek hesapta çalışmayı bot varsayılan olarak reddeder (`--allow-real` gerekir). Bu karar sizindir.
 
-Çalışırken iki dosya oluşur: `fitil_journal.csv` (her sinyal, giriş, stop taşıma, çıkış) ve
-`fitil_state.json` (gün başı özkaynak, zirve, günlük işlem sayısı).
+Çalışırken `fitil_journal.csv` (her sinyal, giriş, stop taşıma, çıkış, çekim önerisi) ve
+`fitil_state.json` (gün başı özkaynak, zirve, günlük işlem sayısı) oluşur. `fitil.bat` çift
+tıklamayla sinyal modunda başlatır.
+
+## Güvenlik davranışları
+
+- **Bağlantı koparsa** bot her turda yeniden bağlanmayı dener; stoplar bu sırada brokerda durur.
+- **Para çekme ya da yatırma** kâr/zarar sayılmaz: düşüş freni ve günlük kayıp sınırı buna göre ölçeklenir.
+- **Stopsuz pozisyon** (bu bota ait) görülürse hemen kapatılır.
+- **Durum dosyası kaybolursa** açık pozisyonun stop takibi mevcut stoptan yeniden kurulur.
+- **İkinci kopya** aynı klasörde başlatılamaz (`fitil.lock`).
+- **Veri saatleri:** NFP (ayın ilk cuması 08:30 New York) ve EIA (çarşamba 10:30 New York, yalnızca
+  `"group": "oil"` semboller) çevresinde 15 dakika giriş yapılmaz. Tatil haftalarında bu saatler kayar;
+  kesin tarihleri ve FOMC, CPI gibi verileri `blackouts` listesine siz yazın.
+- **Çekim önerisi:** cuma kapanışında, önceki zirveyi aşan kârın yarısı günlüğe "ÇEKİM" satırı olarak
+  yazılır. Bot para çekemez; karar ve işlem sizindir. Oran `withdraw_frac` ile değişir.
+
+## Geçmiş veride sınama
+
+Canlıdaki aynı strateji ve motor kodu, simüle brokerla çalışır:
+
+```
+python -m fitil.backtest --config config.json --data ..\data --tz-shift 2 --trades-out islemler.csv
+```
+
+`--data` klasöründe config'teki sembol adıyla `<SEMBOL>.csv` dosyaları olmalı. MT5 çubuk dışa
+aktarımı (M15 ya da M1) ve HistData M1 biçimi okunur. `--tz-shift`, verinin UTC'den farkıdır;
+MT5 sunucu saati çoğunlukla UTC+2 ya da UTC+3'tür. Rapor kuruluma, sembole, çıkış nedenine ve
+giriş saatine göre döküm verir. Simülasyon sabit spread kullanır ve çubuk içi sırayı bilemez;
+sonuçlar gerçeğe göre iyimser olabilir.
+
+## Beklenti hesabı
+
+Backtest ya da demo sonuçlarınızdaki kazanma oranı ve ortalama kazançla, risk kuralları altında
+bir yılın nasıl geçebileceğini gösterir:
+
+```
+python -m fitil.plan --equity 1000 --win-rate 0.42 --avg-win 1.5 --trades-per-day 6 --weekly-target 100
+```
+
+Girdiler sizin varsayımınızdır; araç bir tahmin değil, "bu istatistikler gerçekse" hesabıdır.
 
 ## Bilinen sınırlar
 

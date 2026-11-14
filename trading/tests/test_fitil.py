@@ -514,5 +514,23 @@ class Backtest(unittest.TestCase):
                          ["fx", "jpy", "fx_usd", "gold", "oil", "oil", "gold"])
 
 
+class Plan(unittest.TestCase):
+    def test_expectation_drives_outcome_and_brake_limits_damage(self):
+        from fitil.plan import required_equity, simulate
+        kw = dict(trades_per_day=6, paths=1500, weeks=26)
+        good = simulate(1000.0, win_rate=0.45, avg_win=1.8, avg_loss=1.0, **kw)
+        bad = simulate(1000.0, win_rate=0.35, avg_win=1.5, avg_loss=1.0, **kw)
+        self.assertAlmostEqual(good["beklenti_R"], 0.26)
+        self.assertGreater(good["yil_sonu_toplam_medyan"], 1000.0)
+        self.assertLess(bad["yil_sonu_toplam_medyan"], 1000.0)
+        self.assertGreater(bad["durma_olasiligi"], 0.9)
+        self.assertGreater(bad["yil_sonu_toplam_p5"], 1000.0 * 0.75)     # fren kaybı yaklaşık %20'de keser
+        self.assertLess(bad["haftalik_cekim_medyan"], 1.0)
+        # oransallık: 10 kat sermaye, 10 kat çekim
+        big = simulate(10_000.0, win_rate=0.45, avg_win=1.8, avg_loss=1.0, **kw)
+        self.assertAlmostEqual(big["haftalik_cekim_medyan"] / good["haftalik_cekim_medyan"], 10.0, places=6)
+        self.assertEqual(required_equity(100.0, win_rate=0.35, avg_win=1.5, avg_loss=1.0, **kw) > 1e6, True)
+
+
 if __name__ == "__main__":
     unittest.main()
