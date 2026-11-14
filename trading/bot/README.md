@@ -173,6 +173,21 @@ Okuma:
   eldeki tek olumlu sonuç EURUSD'nin bir dönemi.
 - Eksik olan: diğer majör pariteler, tam seans altın ve petrolün daha uzun dönemleri.
 
+Sınanıp reddedilen hipotez, "kırılım devamı": 2017 EURUSD verisinde süpürme sinyalinden sonra fiyatın
+kırılım yönünde devam ettiği görülmüştü. Seans içinde bir likidite seviyesinin (önceki gün tepe/dibi,
+Asya aralığı) ötesinde taze kapanışlar bağımsız verilerde incelendi (kırılım yönünde, ATR cinsinden
+ortalama hareket):
+
+| Veri | Olay | 4 saat sonra | Gün sonunda |
+|---|---|---|---|
+| EURUSD saatlik 2017 (hipotezin çıktığı veri) | 444 | +0,24 (t = 2,5) | +0,24 (t = 1,4) |
+| EURUSD M15 2019-20 | 578 | +0,12 (t = 0,7) | -0,09 (t = -0,3) |
+| EURUSD saatlik 2019-20 | 499 | +0,11 (t = 1,1) | -0,01 (t = -0,1) |
+| Altın M15, Ekim - Aralık 2021 | 79 | +0,70 (t = 1,8) | +0,47 (t = 0,7) |
+
+Bağımsız EURUSD verisinde etki yok; 2017'deki sonuç o yılın tek yönlü trendinin yansımasıydı. Altın
+örneği küçük ve anlamlı değil. Bu yüzden kırılım devamı kurulum olarak eklenmedi.
+
 Bu istatistikler gerçek olsaydı ne anlama gelirdi (`fitil.plan` ile, 2019-20 M15 değerleri: kazanma
 %44, ortalama kazanç 1,33R, ortalama kayıp 0,80R, enstrüman başına günde 0,7 işlem):
 
