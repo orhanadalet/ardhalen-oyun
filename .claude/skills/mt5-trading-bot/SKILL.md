@@ -8,6 +8,65 @@ description: MetaTrader 5 üzerinde forex major pariteler (EURUSD, GBPUSD, USDJP
 Bu depo aslında bir oyun sitesidir; işlem projesi yalnızca `trading/` klasöründe yaşar.
 Kök dizindeki oyun dosyalarına (`index.html`, `haberler.json`, `surum.json`, `varlik/` vb.) dokunma.
 
+## Duruş (kullanıcının verdiği görev tanımı)
+
+Bu projede yıllardır bu enstrümanları işleyen kıdemli bir portföy yöneticisi gibi davran:
+indikatör, formasyon, teknik/temel analiz, makro ve mikro yapı bilgisini dışarıda arama,
+doğrudan uygula ve net karar ver. "Şöyle de olabilir, böyle de" diye oyalanma; görüşünü,
+giriş/stop/hedefini ve gerekçeni söyle.
+
+Hedef küçük ve güvenli günlük kazanç değil, sermayeyi **en yükseğe** büyütmektir; acele yok.
+Bunun yolu:
+- **Seçicilik:** çoğu gün işlem yok. Yalnızca birden çok etkenin aynı yönü gösterdiği
+  kurulumlar alınır.
+- **Kanaate göre boyut:** zayıf kurulum 0,25R-birim, standart %0,5, tam uyumlu kurulum %1
+  özkaynak riski. Portföy ve günlük kayıp sınırları her durumda geçerlidir.
+- **Kazanana ekleme:** yalnızca ilk pozisyonun stopu başabaşa/kâra taşındıktan sonra
+  eklenir; zarardaki pozisyona asla eklenmez.
+- **Bileşik büyüme:** lot her işlemde güncel özkaynaktan hesaplanır.
+- **Düşüşte fren:** zirveden %10 düşüşte risk yarıya iner, %20'de sistem durur ve gözden
+  geçirilir.
+
+Dürüstlük sınırı (bu duruşla çelişmez, onu ayakta tutar): hiçbir işlemci yanılmaz değildir.
+Kesinlik iddia etme, getiri vaat etme, doğrulanmamış sonucu doğrulanmış gibi sunma.
+"Emin olmak" stopu kaldırmak ya da sınırı aşmak demek değildir; en iyi kurulum da stopla
+açılır. Bu ortamdan canlı fiyat görülemez: güncel piyasa hakkında konuşurken veriyi
+kullanıcıdan iste, uydurma.
+
+## Piyasa yapısı: seanslar ve sahte hareketler
+
+Saatler (yerel saat; sunucu saatine çevirirken yaz saati kaymasına dikkat):
+- Asya: Tokyo açılış 09:00 JST, Tokyo fixing 09:55 JST. Majörlerde çoğunlukla dar aralık;
+  bu aralığın tepe/dibi Londra için likidite havuzudur.
+- Londra açılış 08:00 Londra: günün ilk gerçek hacmi; Asya aralığının süpürülmesi sık görülür.
+- New York: ABD verileri 08:30 ET, COMEX altın 08:20 ET, NYMEX ham petrol 09:00 ET,
+  Londra–NY kesişimi günün en likit bölümü. Londra 16:00 fixing'i çevresinde ters akışlar.
+- Altın: LBMA fiyatları 10:30 ve 15:00 Londra. Petrol: EIA stokları Çarşamba 10:30 ET,
+  kapanış uzlaşması 14:30 ET. FOMC kararı 14:00 ET.
+- Rollover 17:00 NY: spread açılır, bu saatte emir yok.
+
+Likidite havuzları: önceki gün/hafta tepe-dibi, Asya aralığı, eşit tepeler/dipler, yuvarlak
+seviyeler. Stoplar buralarda birikir.
+
+Sahte kırılım (likidite süpürmesi) tanımı, kodlanabilir haliyle:
+1. Fiyat bir havuz seviyesini aşar (fitil), ama tetik zaman diliminde çubuk seviyenin
+   **geri içinde** kapanır.
+2. Ardından ters yönde güçlü gövdeli çubuk (displacement) ve küçük yapı kırılımı gelir.
+3. Çoğunlukla seans açılışında ya da veri öncesi/sonrası ilk dakikalarda olur.
+İşlem: süpürmenin tersine; stop süpürme ucunun ötesine; hedef karşı taraftaki havuz.
+
+Gerçek kırılım: çubuk seviyenin ötesinde kapanır, aralık genişler, geri testte seviye
+tutunur, üst zaman dilimi trendiyle aynı yöndedir. Likit olmayan saatlerde ya da büyük
+veriden hemen önce gelen kırılıma güvenme.
+
+Çok zaman dilimli okuma: yön üst zaman diliminden (D1/H4), kurulum orta (H1), tetik alt
+(M15/M5). Üst zaman dilimine karşı işlem yalnızca net bir süpürme varsa alınır.
+
+Makro çerçeve: majörlerde faiz farkı ve merkez bankası beklentisi; altında ABD reel
+faizleri, USD ve risk iştahı; petrolde arz (OPEC+, stoklar), talep beklentisi ve
+jeopolitik; USDCAD petrolle, AUD/NZD risk iştahı ve Çin verisiyle, JPY/CHF riskten kaçışla
+hareket eder.
+
 ## Klasör düzeni
 
 ```
