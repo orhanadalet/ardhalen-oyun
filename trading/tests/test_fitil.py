@@ -16,6 +16,8 @@ from fitil.config import Config, StrategyParams                    # noqa: E402
 from fitil.engine import Engine                                    # noqa: E402
 from fitil.mt5_broker import MT5Broker                             # noqa: E402
 from fitil.strategy import evaluate, htf_bias, liquidity_levels    # noqa: E402
+from fitil import backtest as bt                                   # noqa: E402
+from fitil import events                                           # noqa: E402
 
 SPREAD = 0.00002
 SPEC = Spec("EURUSD", 5, 0.00001, 0.01, 0.01, 100.0)
@@ -263,7 +265,6 @@ def fake_mt5(demo=True, server_offset_h=2):
         ORDER_FILLING_FOK=0, ORDER_FILLING_IOC=1, ORDER_FILLING_RETURN=2, TRADE_RETCODE_DONE=10009,
         sent=[], pos=[])
     import time as _t
-    m.initialize = lambda: True
     m.shutdown = lambda: None
     m.last_error = lambda: (0, "ok")
     m.account_info = lambda: types.SimpleNamespace(trade_mode=0 if demo else 2, equity=5000.0, balance=5000.0,
@@ -275,6 +276,26 @@ def fake_mt5(demo=True, server_offset_h=2):
     m.order_calc_profit = lambda typ, s, vol, a, b: (b - a) * 100_000 * vol * (1 if typ == 0 else -1)
     m.order_calc_margin = lambda typ, s, vol, price: vol * 1000.0
     m.positions_get = lambda: tuple(m.pos)
+    m.DEAL_TYPE_BALANCE = 2
+    m.connected, m.inits, m.deals = True, 0, []
+    m.terminal_info = lambda: types.SimpleNamespace(connected=m.connected, trade_allowed=True)
+    m.history_deals_get = lambda lo, hi: tuple(d for d in m.deals if lo <= d.time <= hi)
+
+    def initialize():
+        m.inits += 1
+        m.connected = True
+        return True
+    m.initialize = initialize
+
+    def copy_rates_from_pos(sym, tf, pos, count):
+        df = m15(count + 1, end=pd.Timestamp(_t.time(), unit="s").floor("15min"))
+        t = (df.index.astype("int64") // 10**9 + server_offset_h * 3600).to_numpy()
+        arr = np.zeros(count, dtype=[("time", "i8"), ("open", "f8"), ("high", "f8"), ("low", "f8"), ("close", "f8")])
+        for k in ("open", "high", "low", "close"):
+            arr[k] = df[k].to_numpy()[:count]
+        arr["time"] = t[:count]
+        return arr
+    m.copy_rates_from_pos = copy_rates_from_pos
 
     def order_send(req):
         m.sent.append(req)
@@ -323,6 +344,174 @@ class MT5Adapter(unittest.TestCase):
         self.assertEqual((req["type"], req["position"], req["price"]), (1, 777, 1.1000))
         self.assertTrue(b.modify_sl(pos, 1.0990))
         self.assertEqual((m.sent[-1]["action"], m.sent[-1]["sl"]), (m.TRADE_ACTION_SLTP, 1.0990))
+
+
+    def test_heartbeat_reconnects(self):
+        m = fake_mt5()
+        b = MT5Broker(cfg(), mt5=m)
+        n = m.inits
+        b.heartbeat()
+        self.assertEqual(m.inits, n)                 # bağlıyken yeniden başlatmaz
+        m.connected = False
+        b.heartbeat()
+        self.assertEqual(m.inits, n + 1)
+
+    def test_bars_are_closed_utc_bars(self):
+        b = MT5Broker(cfg(), mt5=fake_mt5(server_offset_h=3))
+        df = b.bars("EURUSD", 50)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        self.assertEqual(len(df), 50)
+        self.assertLessEqual(df.index[-1].to_pydatetime(), now)             # sunucu saati UTC'ye çevrildi
+        self.assertLess((now - b.last_bar_time("EURUSD")).total_seconds(), 31 * 60)
+
+    def test_net_flows_counts_only_balance_deals_after_since(self):
+        import time as _t
+        m = fake_mt5(server_offset_h=2)
+        b = MT5Broker(cfg(), mt5=m)
+        srv = _t.time() + 2 * 3600
+        m.deals = [types.SimpleNamespace(type=2, profit=-300.0, time=srv - 600),      # çekim, 10 dk önce
+                   types.SimpleNamespace(type=2, profit=1000.0, time=srv - 7200),     # yatırma, 2 saat önce
+                   types.SimpleNamespace(type=0, profit=55.0, time=srv - 300)]        # işlem kârı: akış değil
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        self.assertEqual(b.net_flows_since(now - timedelta(hours=1)), -300.0)
+        self.assertEqual(b.net_flows_since(now - timedelta(hours=3)), 700.0)
+
+    def test_engine_runs_against_mt5_adapter(self):
+        m = fake_mt5()
+        logs = []
+        e = Engine(MT5Broker(cfg(), mt5=m), cfg(settle_sec=0.0), log=logs.append)
+        e.step()
+        e.step()
+        self.assertFalse([x for x in logs if "HATA" in x])
+
+
+class Hardening(unittest.TestCase):
+    def setUp(self):
+        self.df, _ = with_sweep_low(m15())
+        self.logs = []
+
+    def test_withdrawal_does_not_trigger_drawdown_brake_or_daily_limit(self):
+        b = at_end(self.df)
+        e = Engine(b, cfg(), log=self.logs.append)
+        e.state.update(day=b.now().strftime("%Y-%m-%d"), day_start_equity=10_000.0, peak_equity=10_000.0,
+                       flows_until=(b.now() - timedelta(hours=1)).isoformat(), withdraw_base=10_000.0)
+        b.deposit(-5_000.0)                                # hesabın yarısı çekildi
+        e.step()
+        self.assertAlmostEqual(e.state["peak_equity"], 5_000.0, delta=1.0)
+        self.assertEqual(e.risk_factor(b.account().equity), 1.0)
+        self.assertEqual(len(b.positions()), 1)            # işlem hâlâ açılabiliyor
+        self.assertTrue(any("AKIŞ" in x for x in self.logs))
+
+    def test_real_loss_still_triggers_brake_after_withdrawal(self):
+        b = at_end(self.df)
+        e = Engine(b, cfg(), log=self.logs.append)
+        e.state.update(day=b.now().strftime("%Y-%m-%d"), day_start_equity=12_500.0, peak_equity=12_500.0,
+                       flows_until=(b.now() - timedelta(hours=1)).isoformat(), withdraw_base=12_500.0)
+        b.balance = 12_000.0                               # önce 12.500 -> 12.000 gerçek kayıp (-%4)
+        b.deposit(-2_000.0)                                # sonra 2.000 çekim
+        e.step()
+        self.assertAlmostEqual(e.drawdown(b.account().equity), 0.04, delta=0.002)
+        self.assertEqual(b.positions(), [])                # günlük kayıp sınırı (%3) hâlâ geçerli
+
+    def test_position_without_stop_is_closed(self):
+        b = at_end(self.df)
+        b.market_order("EURUSD", 1, 0.10, 1.0, "elle")
+        b.positions()[0].sl = 0.0
+        e = Engine(b, cfg(), log=self.logs.append)
+        e.step()
+        self.assertTrue(all(p.sl > 0 for p in b.positions()))
+        self.assertEqual(b.closed[0]["reason"], "kapat")
+        self.assertTrue(any("stopsuz" in x for x in self.logs))
+
+    def test_trailing_recovers_after_state_loss(self):
+        b = at_end(self.df)
+        e = Engine(b, cfg(), log=self.logs.append)
+        e.step()
+        p = b.positions()[0]
+        e2 = Engine(b, cfg(), log=self.logs.append)        # durum dosyası olmadan yeniden başlatma
+        e2._manage(b.now(), p, b.bars("EURUSD", 1500))
+        meta = e2.state["tickets"][str(p.ticket)]
+        self.assertAlmostEqual(meta["init_dist"], p.entry - p.sl)
+
+    def test_recurring_blackouts(self):
+        rules = Config(symbols={"X": {"usd_beta": 0}}).recurring_blackouts
+        f = lambda t, g=None: events.blocked(datetime.fromisoformat(t), g, [], rules, 15)
+        self.assertEqual(f("2024-03-01T13:35"), "veri saati: NFP")      # kış: 08:30 ET = 13:30 UTC
+        self.assertEqual(f("2024-07-05T12:25"), "veri saati: NFP")      # yaz: 08:30 ET = 12:30 UTC
+        self.assertIsNone(f("2024-07-05T13:30"))
+        self.assertIsNone(f("2024-03-08T13:30"))                        # ikinci cuma
+        self.assertEqual(f("2024-03-06T15:30", "oil"), "veri saati: EIA")
+        self.assertIsNone(f("2024-03-06T15:30", None))                  # EIA yalnızca petrol grubuna
+        e = Engine(at_end(self.df), Config(symbols={"EURUSD": {"usd_beta": -1}, "XTIUSD": {"usd_beta": 0, "group": "oil"}}),
+                   log=self.logs.append)
+        t = datetime(2024, 3, 6, 15, 30)
+        self.assertIsNone(e.entry_block(t, 10_000, 0, "EURUSD"))
+        self.assertEqual(e.entry_block(t, 10_000, 0, "XTIUSD"), "veri saati: EIA")
+
+    def test_withdraw_hint_once_per_week_from_profit_above_base(self):
+        b = at_end(self.df)
+        e = Engine(b, cfg(), log=self.logs.append)
+        e.state["withdraw_base"] = 9_000.0
+        friday = datetime(2024, 3, 15, 20, 0)
+        e._withdraw_hint(friday, 10_000.0)
+        self.assertEqual(sum("ÇEKİM" in x for x in self.logs), 1)
+        self.assertIn("oneri=500.0", [x for x in self.logs if "ÇEKİM" in x][0])
+        self.assertEqual(e.state["withdraw_base"], 9_500.0)
+        e._withdraw_hint(friday + timedelta(minutes=5), 10_000.0)        # aynı hafta: tekrar yok
+        self.assertEqual(sum("ÇEKİM" in x for x in self.logs), 1)
+        e._withdraw_hint(friday + timedelta(days=7), 9_400.0)            # zirvenin altında: öneri yok
+        self.assertEqual(sum("ÇEKİM" in x for x in self.logs), 1)
+        e._withdraw_hint(datetime(2024, 3, 14, 20, 0), 20_000.0)         # perşembe: öneri yok
+        self.assertEqual(sum("ÇEKİM" in x for x in self.logs), 1)
+
+
+class Backtest(unittest.TestCase):
+    def test_loaders_mt5_and_histdata_m1(self):
+        df = m15(40, end="2024-03-13 09:00")
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "EURUSD.csv"
+            with p.open("w") as f:
+                f.write("<DATE>\t<TIME>\t<OPEN>\t<HIGH>\t<LOW>\t<CLOSE>\t<TICKVOL>\t<VOL>\t<SPREAD>\n")
+                for t, r in df.iterrows():
+                    f.write(f"{t:%Y.%m.%d}\t{t:%H:%M:%S}\t{r.open:.5f}\t{r.high:.5f}\t{r.low:.5f}\t{r.close:.5f}\t1\t0\t1\n")
+            got = bt.load_m15(p)
+            self.assertEqual(len(got), 40)
+            self.assertEqual(got.index[-1], df.index[-1])
+            self.assertEqual(bt.load_m15(p, tz_shift_hours=2).index[-1], df.index[-1] - pd.Timedelta(hours=2))
+            q = Path(d) / "m1.csv"                          # HistData M1: 30 dakika -> 2 adet M15
+            with q.open("w") as f:
+                for i in range(30):
+                    t = pd.Timestamp("2024-03-13 09:00") + pd.Timedelta(minutes=i)
+                    px = 1.10 + i * 0.0001
+                    f.write(f"{t:%Y%m%d %H%M%S};{px:.5f};{px + 0.00005:.5f};{px - 0.00005:.5f};{px + 0.00002:.5f};0\n")
+            m = bt.load_m15(q)
+            self.assertEqual(len(m), 2)
+            self.assertAlmostEqual(m.open.iloc[0], 1.10)
+            self.assertAlmostEqual(m.close.iloc[0], 1.10 + 14 * 0.0001 + 0.00002)
+            self.assertAlmostEqual(m.high.iloc[1], 1.10 + 29 * 0.0001 + 0.00005)
+
+    def test_run_and_report_end_to_end(self):
+        rng = np.random.default_rng(4)
+        idx = pd.date_range("2024-01-01", periods=4 * 24 * 30, freq="15min")
+        idx = idx[idx.weekday < 5]
+        c = 1.10 * np.exp(np.cumsum(rng.standard_t(4, len(idx)) * 0.0004))
+        o = np.concatenate([[1.10], c[:-1]])
+        w = np.abs(rng.normal(0, 0.0003, (2, len(idx))))
+        df = pd.DataFrame({"open": o, "high": np.maximum(o, c) + w[0], "low": np.minimum(o, c) - w[1], "close": c}, index=idx)
+        trades, equity, engine = bt.run({"EURUSD": df}, cfg(), equity=10_000.0)
+        self.assertGreater(len(trades), 5)
+        self.assertAlmostEqual(equity.iloc[-1], 10_000.0 + trades.pnl.sum(), places=4)   # muhasebe tutarlı
+        self.assertTrue((pd.to_datetime(trades.close_time).dt.normalize() == pd.to_datetime(trades.open_time).dt.normalize()).all())
+        self.assertTrue(pd.to_datetime(trades.open_time).dt.hour.between(7, 16).all())
+        self.assertGreaterEqual(trades.r.min(), -1.6)       # kayıp, boşluk/kayma payıyla yaklaşık 1R'yi aşmaz
+        self.assertLessEqual((trades.risk / 10_000.0).max(), 0.0105)
+        text = bt.report(trades, equity)
+        for key in ("Kazanma oranı", "Kuruluma göre", "Sembole göre", "Aylık getiri"):
+            self.assertIn(key, text)
+
+    def test_symbol_kinds(self):
+        self.assertEqual([bt.kind_of(s) for s in ("EURUSD", "USDJPY", "USDCAD", "XAUUSD.m", "USOIL", "XBRUSD", "GOLD")],
+                         ["fx", "jpy", "fx_usd", "gold", "oil", "oil", "gold"])
 
 
 if __name__ == "__main__":

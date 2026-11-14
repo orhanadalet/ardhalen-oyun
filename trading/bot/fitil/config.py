@@ -28,7 +28,7 @@ class StrategyParams:
 
 @dataclass
 class Config:
-    # sembol adı (brokerdaki TAM ad) -> {"usd_beta": -1 | 0 | +1}
+    # sembol adı (brokerdaki TAM ad) -> {"usd_beta": -1 | 0 | +1, "group": "oil" (isteğe bağlı)}
     #   usd_beta: sembolde LONG olmak USD'de short ise -1 (EURUSD, XAUUSD), long ise +1 (USDJPY), petrol 0
     symbols: dict = field(default_factory=dict)
     magic: int = 20261115
@@ -44,6 +44,10 @@ class Config:
     flat_hour: int = 20               # bu saatte tüm pozisyonlar kapatılır (rollover öncesi)
     blackouts: list = field(default_factory=list)   # ["2026-11-18T19:00", ...] UTC, yüksek etkili veri
     blackout_minutes: int = 15        # veri saatinin bu kadar öncesi/sonrası giriş yok
+    recurring_blackouts: list = field(default_factory=lambda: [
+        {"name": "NFP", "weekday": 4, "week_of_month": 1, "time": "08:30", "tz": "America/New_York"},
+        {"name": "EIA", "weekday": 2, "time": "10:30", "tz": "America/New_York", "groups": ["oil"]},
+    ])
 
     # Risk (özkaynak kesri)
     risk_tiers: dict = field(default_factory=lambda: {1: 0.0025, 2: 0.005, 3: 0.01})
@@ -59,6 +63,11 @@ class Config:
     breakeven_at_r: float = 1.0       # bu kadar R lehe gidince stop girişe
     trail_start_r: float = 1.5        # bu kadar R'den sonra stop yapıyı izler
     trail_bars: int = 8
+
+    # Çekim önerisi: haftada bir, önceki zirveyi aşan kârın bu kadarı çekilmek üzere önerilir.
+    # Bot para çekemez; yalnızca tutarı günlüğe yazar. 0 = kapalı.
+    withdraw_frac: float = 0.5
+    withdraw_weekday: int = 4         # 4 = Cuma (gün sonu kapanışında)
 
     strategy: StrategyParams = field(default_factory=StrategyParams)
 
@@ -88,3 +97,14 @@ class Config:
             raise ValueError("max_portfolio_risk (0, 0.10] aralığında olmalı")
         if not 0 <= self.entry_hours[0] < self.entry_hours[1] <= self.flat_hour <= 23:
             raise ValueError("entry_hours ve flat_hour tutarsız")
+        if not 0 < self.dd_half_risk < self.dd_halt < 1:
+            raise ValueError("dd_half_risk < dd_halt olmalı")
+        if not 0 <= self.withdraw_frac <= 1:
+            raise ValueError("withdraw_frac 0-1 aralığında olmalı")
+        if not 0 < self.daily_loss_limit <= 0.10:
+            raise ValueError("daily_loss_limit (0, 0.10] aralığında olmalı")
+        from datetime import datetime
+        from .events import validate_rules
+        for x in self.blackouts:
+            datetime.fromisoformat(x)
+        validate_rules(self.recurring_blackouts)

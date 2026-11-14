@@ -6,6 +6,7 @@ modülüyle istek yapısı test edildi. İlk çalıştırma mutlaka demo hesapta
 """
 from __future__ import annotations
 
+import calendar
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -32,6 +33,7 @@ class MT5Broker:
             if mt5.symbol_info(sym) is None or not mt5.symbol_select(sym, True):
                 raise RuntimeError(f"Sembol bulunamadı: {sym} (Market Watch'taki tam adı yazın)")
         self._offset = self._server_offset()
+        self._offset_at = time.time()
 
     # --- sunucu saati ---
     def _server_offset(self) -> timedelta:
@@ -49,6 +51,34 @@ class MT5Broker:
         return datetime.fromtimestamp(server_epoch, timezone.utc).replace(tzinfo=None) - self._offset
 
     # --- Broker arayüzü ---
+    def heartbeat(self) -> None:
+        """Terminal bağlantısını doğrular; koptuysa yeniden kurar. Saat farkını saatte bir yeniler (yaz saati)."""
+        ti = self.mt5.terminal_info()
+        if ti is None or not ti.connected:
+            self.mt5.shutdown()
+            if not self.mt5.initialize():
+                raise RuntimeError(f"MT5 bağlantısı yok: {self.mt5.last_error()}")
+            if self.mt5.terminal_info() is None or not self.mt5.terminal_info().connected:
+                raise RuntimeError("MT5 terminali sunucuya bağlı değil")
+        if time.time() - self._offset_at > 3600 and self.cfg.server_utc_offset_hours is None:
+            self._offset_at = time.time()
+            try:
+                self._offset = self._server_offset()
+            except RuntimeError:
+                pass                                   # piyasa kapalı: eski değer kalır
+
+    def trading_enabled(self) -> bool:
+        ti = self.mt5.terminal_info()
+        return bool(ti is not None and ti.trade_allowed)
+
+    def net_flows_since(self, since: datetime) -> float:
+        """since (UTC) sonrasındaki para yatırma/çekme toplamı (hesap para biriminde)."""
+        lo = calendar.timegm(since.timetuple()) - 2 * 86400
+        hi = int(time.time()) + 2 * 86400
+        deals = self.mt5.history_deals_get(lo, hi) or ()
+        return float(sum(d.profit for d in deals
+                         if d.type == self.mt5.DEAL_TYPE_BALANCE and self._utc(d.time) > since))
+
     def now(self) -> datetime:
         return datetime.now(timezone.utc).replace(tzinfo=None)
 

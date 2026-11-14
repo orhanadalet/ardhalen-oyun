@@ -60,6 +60,8 @@ class OrderResult:
 
 class Broker(Protocol):
     def now(self) -> datetime: ...
+    def heartbeat(self) -> None: ...                                    # bağlantıyı doğrula / yeniden kur
+    def net_flows_since(self, since: datetime) -> float: ...            # para yatırma (+) / çekme (-) toplamı
     def account(self) -> Account: ...
     def spec(self, symbol: str) -> Spec: ...
     def tick(self, symbol: str) -> Tick | None: ...
@@ -101,6 +103,8 @@ class PaperBroker:
         self._pos: dict[int, Pos] = {}
         self._next = 1
         self.closed: list[dict] = []
+        self._flows: list[tuple[datetime, float]] = []
+        self._meta: dict[int, tuple[float, str]] = {}        # ticket -> (başlangıç riski, emir açıklaması)
         self.timeline = sorted(set().union(*[df.index for df in data.values()]))
         self._i = 0
         if start is not None:
@@ -149,6 +153,18 @@ class PaperBroker:
         bid = self._last[p.symbol]
         return bid if p.direction > 0 else bid + self.spread[p.symbol]
 
+    def heartbeat(self) -> None:
+        return None
+
+    def net_flows_since(self, since: datetime) -> float:
+        flow = sum(a for t, a in self._flows if t > since)
+        return flow
+
+    def deposit(self, amount: float) -> None:
+        """Test için: para yatırma (+) ya da çekme (-)."""
+        self.balance += amount
+        self._flows.append((self.now(), amount))
+
     def account(self) -> Account:
         eq = self.balance + sum(self._pnl(p, self._exit_price(p)) for p in self._pos.values())
         return Account(eq, self.balance, eq, "USD", True)
@@ -191,6 +207,7 @@ class PaperBroker:
         self.balance -= self.commission * lots
         p = Pos(self._next, symbol, direction, lots, price, sl, self.now())
         self._pos[p.ticket] = p
+        self._meta[p.ticket] = (self.loss_per_lot(symbol, direction, price, sl) * lots, comment)
         self._next += 1
         return OrderResult(True, p.ticket, price)
 
@@ -211,7 +228,10 @@ class PaperBroker:
     def _settle(self, p: Pos, price: float, when, reason: str) -> None:
         pnl = self._pnl(p, price)
         self.balance += pnl
+        risk, comment = self._meta.pop(p.ticket, (0.0, ""))
+        net = pnl - self.commission * p.lots
         self.closed.append(dict(ticket=p.ticket, symbol=p.symbol, direction=p.direction, lots=p.lots,
                                 entry=p.entry, exit=price, open_time=p.open_time, close_time=when,
-                                pnl=pnl - self.commission * p.lots, reason=reason))
+                                pnl=net, risk=risk, r=net / risk if risk > 0 else float("nan"),
+                                setup=comment.replace("fitil-", ""), reason=reason))
         del self._pos[p.ticket]

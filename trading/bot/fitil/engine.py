@@ -13,6 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
+from . import events
 from .broker import BAR, Broker, Pos, round_lots_down
 from .config import Config
 from .strategy import Signal, atr, evaluate
@@ -25,7 +26,10 @@ class Engine:
         self.state_path = Path(state_path) if state_path else None
         self.journal_path = Path(journal_path) if journal_path else None
         self.seen: dict[str, datetime] = {}
-        self.state = {"day": "", "day_start_equity": 0.0, "peak_equity": 0.0, "trades_today": 0, "tickets": {}}
+        self.state = {"day": "", "day_start_equity": 0.0, "peak_equity": 0.0, "trades_today": 0, "tickets": {},
+                      "flows_until": "", "withdraw_base": 0.0, "withdraw_week": ""}
+        self._flow_check: datetime | None = None
+        self._warned: set[str] = set()
         if self.state_path and self.state_path.exists():
             self.state.update(json.loads(self.state_path.read_text(encoding="utf-8")))
         self._blackouts = [datetime.fromisoformat(x) for x in cfg.blackouts]
@@ -55,8 +59,51 @@ class Engine:
         if equity > self.state["peak_equity"]:
             self.state["peak_equity"] = equity
             changed = True
+        if self.state["withdraw_base"] <= 0:
+            self.state["withdraw_base"] = equity
+            changed = True
         if changed:
             self._save()
+
+    def _apply_flows(self, now: datetime, equity: float) -> None:
+        """Para yatırma/çekme özkaynağı değiştirir ama kâr/zarar değildir: zirve ve gün başı
+        özkaynağı aynı oranda ölçeklenir ki çekim, düşüş freni ya da günlük kayıp sayılmasın."""
+        if self._flow_check is not None and (now - self._flow_check).total_seconds() < 60:
+            return
+        self._flow_check = now
+        if not self.state["flows_until"]:
+            self.state["flows_until"] = now.isoformat()
+            self._save()
+            return
+        flow = self.broker.net_flows_since(datetime.fromisoformat(self.state["flows_until"]))
+        self.state["flows_until"] = now.isoformat()
+        if flow:
+            before = equity - flow
+            if before > 0:
+                k = equity / before
+                self.state["peak_equity"] *= k
+                self.state["day_start_equity"] *= k
+            if flow > 0:
+                self.state["withdraw_base"] += flow
+            self._journal(now, "AKIŞ", "", tutar=round(flow, 2), ozkaynak=round(equity, 2))
+        self._save()
+
+    def _withdraw_hint(self, now: datetime, equity: float) -> None:
+        """Haftada bir: önceki zirveyi aşan kârın withdraw_frac kadarını çekim önerisi olarak yazar."""
+        c = self.cfg
+        if c.withdraw_frac <= 0 or now.weekday() != c.withdraw_weekday:
+            return
+        week = "{}-W{:02d}".format(*now.isocalendar()[:2])
+        if self.state["withdraw_week"] == week:
+            return
+        self.state["withdraw_week"] = week
+        gain = equity - self.state["withdraw_base"]
+        amount = round(max(0.0, gain) * c.withdraw_frac, 2)
+        if amount > 0:
+            self.state["withdraw_base"] = equity - amount
+            self._journal(now, "ÇEKİM", "", oneri=amount, ozkaynak=round(equity, 2),
+                          not_="zirveyi aşan kârın oranı; çekmek sizin kararınız")
+        self._save()
 
     # ------------------------------------------------------------------ kapılar
     def drawdown(self, equity: float) -> float:
@@ -70,7 +117,7 @@ class Engine:
             return 0.0
         return 0.5 if dd >= self.cfg.dd_half_risk else 1.0
 
-    def entry_block(self, now: datetime, equity: float, n_positions: int) -> str | None:
+    def entry_block(self, now: datetime, equity: float, n_positions: int, symbol: str | None = None) -> str | None:
         """Yeni giriş yasaksa nedenini döndürür."""
         c = self.cfg
         if now.weekday() >= 5:
@@ -86,10 +133,8 @@ class Engine:
             return "günlük işlem sınırı"
         if n_positions >= c.max_positions:
             return "azami pozisyon sayısı"
-        for b in self._blackouts:
-            if abs((now - b).total_seconds()) <= c.blackout_minutes * 60:
-                return "veri saati"
-        return None
+        group = c.symbols.get(symbol, {}).get("group") if symbol else None
+        return events.blocked(now, group, self._blackouts, c.recurring_blackouts, c.blackout_minutes)
 
     def _open_risk(self, positions: list[Pos]) -> tuple[float, float]:
         total = usd = 0.0
@@ -102,10 +147,18 @@ class Engine:
     # ------------------------------------------------------------------ tur
     def step(self) -> None:
         b, c = self.broker, self.cfg
+        b.heartbeat()
         now = b.now()
         acct = b.account()
+        self._apply_flows(now, acct.equity)
         self._roll_day(now, acct.equity)
         positions = b.positions()
+
+        for p in [p for p in positions if p.sl <= 0]:        # güvenlik: stopsuz pozisyon tutulmaz
+            self._journal(now, "UYARI", p.symbol, ticket=p.ticket, neden="stopsuz pozisyon kapatılıyor")
+            self._close(now, p, "stopsuz pozisyon")
+        if any(p.sl <= 0 for p in positions) and not self.dry_run:
+            positions = b.positions()
 
         live = {str(p.ticket) for p in positions}
         stale = [t for t in self.state["tickets"] if t not in live]
@@ -117,6 +170,8 @@ class Engine:
         if now.hour >= c.flat_hour or now.weekday() >= 5:
             for p in positions:
                 self._close(now, p, "gün sonu")
+            if now.hour >= c.flat_hour and now.weekday() < 5 and (self.dry_run or not b.positions()):
+                self._withdraw_hint(now, b.account().equity)
             return
 
         for sym in c.symbols:
@@ -128,8 +183,12 @@ class Engine:
                 continue
             self.seen[sym] = last
             df = b.bars(sym, c.history_bars)
-            if len(df) == 0:
-                continue
+            if len(df) < c.strategy.min_bars:
+                if sym not in self._warned:
+                    self._warned.add(sym)
+                    self._journal(now, "UYARI", sym, neden="geçmiş yetersiz", cubuk=len(df), gereken=c.strategy.min_bars)
+                if len(df) == 0:
+                    continue
             mine = [p for p in positions if p.symbol == sym]
             if mine:
                 for p in mine:
@@ -137,7 +196,7 @@ class Engine:
                 continue
             if (now - closed_at).total_seconds() > c.max_signal_age_sec:
                 continue                     # bot geç başladı: eski çubuğa girme
-            block = self.entry_block(now, acct.equity, len(positions))
+            block = self.entry_block(now, acct.equity, len(positions), sym)
             if block:
                 continue
             tick = b.tick(sym)
@@ -199,11 +258,17 @@ class Engine:
     # ------------------------------------------------------------------ yönetim
     def _manage(self, now: datetime, p: Pos, df) -> None:
         c = self.cfg
-        meta = self.state["tickets"].get(str(p.ticket))
-        if not meta or meta["init_dist"] <= 0 or len(df) < max(c.trail_bars, c.strategy.atr_period + 1):
+        if len(df) < max(c.trail_bars, c.strategy.atr_period + 1):
             return
         spec = self.broker.spec(p.symbol)
         h, l, cl = (df[k].to_numpy(dtype=float) for k in ("high", "low", "close"))
+        meta = self.state["tickets"].get(str(p.ticket))
+        if not meta or meta["init_dist"] <= 0:
+            # Durum dosyası kayıp (yeniden başlatma): başlangıç riskini mevcut stoptan, o da olmazsa ATR'den kur
+            dist = (p.entry - p.sl) * p.direction
+            meta = {"entry": p.entry, "init_dist": dist if dist > 0 else atr(h, l, cl, c.strategy.atr_period)}
+            self.state["tickets"][str(p.ticket)] = meta
+            self._save()
         moved_r = (cl[-1] - meta["entry"]) * p.direction / meta["init_dist"]
         new_sl = p.sl
         if moved_r >= c.breakeven_at_r:
