@@ -1165,6 +1165,38 @@ class CommandLine(unittest.TestCase):
             out, code, ran = self.run_main(["--config", str(p3), "--workdir", d], sim3)
             self.assertIn("Sembol bulunamadı: XAUUSD.m", str(code))
 
+    def test_turkish_output_survives_legacy_windows_code_page(self):
+        import io
+        import fitil.__main__ as cli
+        from unittest import mock
+        raw = io.BytesIO()
+        legacy = io.TextIOWrapper(raw, encoding="cp437", errors="strict")       # Türkçe harfleri olmayan kod sayfası
+        with self.assertRaises(UnicodeEncodeError):
+            legacy.write("GİRİŞ özkaynak ş ğ"); legacy.flush()
+        raw2 = io.BytesIO()
+        out = io.TextIOWrapper(raw2, encoding="cp437", errors="strict")
+        with mock.patch.object(sys, "stdout", out), mock.patch.object(sys, "stderr", out):
+            cli.use_utf8_output()
+            print("GİRİŞ özkaynak ş ğ ÇEKİM")
+            out.flush()
+        self.assertEqual(raw2.getvalue().decode("utf-8").strip(), "GİRİŞ özkaynak ş ğ ÇEKİM")
+
+    def test_journal_is_excel_readable_and_survives_unprintable_console(self):
+        with tempfile.TemporaryDirectory() as d:
+            df, _ = with_sweep_low(m15())
+
+            def bad_console(msg):
+                msg.encode("ascii")                                             # Türkçe karakterde UnicodeEncodeError
+            e = Engine(at_end(df), cfg(), journal_path=Path(d) / "j.csv", log=bad_console)
+            e.step()                                                            # çökmemeli
+            e._journal(datetime(2024, 3, 13, 9, 0), "ÇIKIŞ", "EURUSD", neden="gün sonu")
+            raw = (Path(d) / "j.csv").read_bytes()
+            self.assertTrue(raw.startswith(b"\xef\xbb\xbf"))                    # BOM: Excel UTF-8 olarak açar
+            self.assertEqual(raw.count(b"\xef\xbb\xbf"), 1)                     # yalnızca dosya başında
+            text = raw.decode("utf-8-sig")
+            self.assertIn("GİRİŞ", text)
+            self.assertIn("gün sonu", text)
+
     def test_second_instance_in_same_folder_is_refused(self):
         import fitil.__main__ as cli
         with tempfile.TemporaryDirectory() as d:

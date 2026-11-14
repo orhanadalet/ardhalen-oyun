@@ -64,11 +64,15 @@ class Engine:
         self._save()
 
     def _journal(self, now: datetime, event: str, symbol: str = "", **kw) -> None:
-        self.log(f"{now:%Y-%m-%d %H:%M:%S} {event:10s} {symbol:10s} " + " ".join(f"{k}={v}" for k, v in kw.items()))
+        try:
+            self.log(f"{now:%Y-%m-%d %H:%M:%S} {event:10s} {symbol:10s} " + " ".join(f"{k}={v}" for k, v in kw.items()))
+        except UnicodeEncodeError:               # konsol Türkçe karakteri yazamıyorsa günlük yine de tutulur
+            pass
         if not self.journal_path:
             return
         new = not self.journal_path.exists()
-        with self.journal_path.open("a", newline="", encoding="utf-8") as f:
+        # utf-8-sig: Excel dosyayı Türkçe karakterleriyle doğru açar; BOM yalnızca dosya başına yazılır
+        with self.journal_path.open("a", newline="", encoding="utf-8-sig") as f:
             w = csv.writer(f)
             if new:
                 w.writerow(["time_utc", "event", "symbol", "detail"])

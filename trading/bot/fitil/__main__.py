@@ -30,7 +30,18 @@ def acquire_lock(path: Path):
     return f
 
 
+def use_utf8_output() -> None:
+    """Türkçe karakterli çıktı, Windows'ta eski kod sayfalarında (ör. çıktı dosyaya yönlendirildiğinde)
+    UnicodeEncodeError ile botu düşürmesin: çıktı UTF-8 yazılır, yazılamayan karakter '?' olur."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main() -> None:
+    use_utf8_output()
     ap = argparse.ArgumentParser(prog="fitil")
     ap.add_argument("--config", required=True)
     ap.add_argument("--trade", action="store_true", help="emir gönder (yoksa yalnızca sinyal yazar)")

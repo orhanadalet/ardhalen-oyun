@@ -220,6 +220,8 @@ WF_GRID = {"setups": [("sweep", "pullback"), ("sweep",), ("pullback",)], "max_st
 
 
 def main() -> None:
+    from .__main__ import use_utf8_output
+    use_utf8_output()
     ap = argparse.ArgumentParser(prog="fitil.backtest")
     ap.add_argument("--config", required=True)
     ap.add_argument("--data", required=True)

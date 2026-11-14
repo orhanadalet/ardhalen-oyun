@@ -73,6 +73,8 @@ def required_equity(weekly_target: float, **kw) -> float:
 
 
 def main() -> None:
+    from .__main__ import use_utf8_output
+    use_utf8_output()
     ap = argparse.ArgumentParser(prog="fitil.plan")
     ap.add_argument("--equity", type=float, required=True)
     ap.add_argument("--win-rate", type=float, required=True, help="0-1 arası, ör. 0.45")
