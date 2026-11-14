@@ -5,6 +5,7 @@
 Veri: --data klasöründe <SEMBOL>.csv (config'teki sembol adıyla). Desteklenen biçimler:
   - MT5 çubuk dışa aktarımı (<DATE> <TIME> <OPEN> <HIGH> <LOW> <CLOSE> ...), M15 ya da M1
   - HistData M1 ASCII (YYYYMMDD HHMMSS;O;H;L;C;V), başlıksız
+  - Dukascopy dışa aktarımı (Gmt time,Open,High,Low,Close,Volume; gün.ay.yıl)
 M1 verisi M15'e toplanır. Zamanlar UTC kabul edilir; MT5 sunucu saatindeyse --tz-shift ile düzeltin.
 
 Simülasyonun sınırları: emirler çubuk kapanış fiyatından dolar, stoplar M15 çubuğu içinde
@@ -57,9 +58,15 @@ def load_m15(path: str | Path, tz_shift_hours: float = 0.0, minutes: int = 15) -
     """Çubuk dosyasını okur ve `minutes` dakikalık çubuklara getirir (daha sık veri toplanır)."""
     path = Path(path)
     first = path.read_text(encoding="utf-8", errors="ignore")[:200].splitlines()[0]
-    if first.startswith(",") or first.lower().startswith(("time,", "datetime,")):     # pandas biçimi: ilk sütun zaman
-        df = pd.read_csv(path, index_col=0, parse_dates=True)
+    if first.startswith(",") or first.lower().startswith(("time,", "datetime,", "gmt time,", "local time,")):
+        # ilk sütun zaman: pandas biçimi ya da Dukascopy dışa aktarımı ("01.02.2017 22:00:00.000" = 1 Şubat)
+        df = pd.read_csv(path, index_col=0)
         df.columns = [c.strip().lower() for c in df.columns]
+        stamps = df.index.astype(str)
+        if len(stamps) and len(stamps[0]) >= 10 and stamps[0][2] == "." and stamps[0][5] == ".":
+            df.index = pd.to_datetime(stamps.str.slice(0, 19), format="%d.%m.%Y %H:%M:%S")
+        else:
+            df.index = pd.to_datetime(stamps)
     elif "<" in first or "date" in first.lower():
         df = pd.read_csv(path, sep=None, engine="python")
         df.columns = [c.strip().strip("<>").lower() for c in df.columns]

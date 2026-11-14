@@ -909,6 +909,18 @@ class Timeframes(unittest.TestCase):
             with self.assertRaises(ValueError):                    # saatlik veri M15 olarak kullanılamaz
                 bt.load_m15(hp, minutes=15)
 
+    def test_loader_reads_dukascopy_day_first_dates(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "duka.csv"
+            p.write_text("Gmt time,Open,High,Low,Close,Volume\n"
+                         "01.02.2017 22:00:00.000,1.05236,1.05253,1.05221,1.05227,143.5\n"
+                         "01.02.2017 23:00:00.000,1.05227,1.05426,1.05226,1.05282,253.1\n"
+                         "02.02.2017 00:00:00.000,1.05282,1.05300,1.05200,1.05250,100.0\n")
+            df = bt.load_m15(p, minutes=60)
+            self.assertEqual(df.index[0], pd.Timestamp("2017-02-01 22:00"))      # 1 Şubat, 2 Ocak değil
+            self.assertEqual(df.index[-1], pd.Timestamp("2017-02-02 00:00"))
+            self.assertAlmostEqual(df.close.iloc[1], 1.05282)
+
     def test_walk_forward_tests_only_on_unseen_period(self):
         folds, oos = bt.walk_forward({"EURUSD": self.h1(2600, seed=3)}, self.conf(),
                                      {"max_stop_atr": [2.0, 3.0]}, train_days=40, test_days=20, min_trades=3)

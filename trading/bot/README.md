@@ -8,8 +8,8 @@ her M15 çubuğu kapanışında tarama yapar.
 - MT5 bağlantısı gerçek terminalde çalıştırılmadı (bu yalnızca Windows'ta mümkün). Kullanılan tüm
   sabitler, fonksiyonlar, alan ve istek adları resmi `MetaTrader5` paketinin (5.0.6231) kaynağıyla
   karşılaştırıldı ve eşleşti.
-- **Strateji kârlı görünmüyor.** Eldeki tek gerçek gün içi veride (EURUSD saatlik, Nisan 2017 - Şubat 2018)
-  127 işlemde ortalama -0,16R verdi; ayrıntı aşağıda "Gerçek veri sonucu" bölümünde.
+- **Strateji kârlı görünmüyor.** Eldeki gerçek gün içi veride (EURUSD saatlik, Ocak 2017 - Şubat 2018)
+  181 işlemde ortalama -0,12R verdi; ayrıntı aşağıda "Gerçek veri sonucu" bölümünde.
   Kendi verinizde sınamadan ve demo hesapta izlemeden gerçek para kullanmayın.
 
 ## Ne yapar
@@ -102,19 +102,34 @@ değilse sonuç şanstan ayırt edilemez.
 
 ## Gerçek veri sonucu
 
-Bu ortamdan ulaşılabilen tek gerçek gün içi veri: EURUSD saatlik, 5.000 çubuk (Nisan 2017 - Şubat 2018).
-Aynı kurallar saatlik çubukta çalıştırıldı (`bar_minutes: 60`):
+Bu ortamdan ulaşılabilen gerçek gün içi veri: EURUSD saatlik, Ocak 2017 - Şubat 2018 (6.867 çubuk).
+İki bağımsız kaynaktan (iki açık kaynak paketin örnek verisi) birleştirildi; örtüşen 4.356 saatte
+kapanışlar birbirini doğruluyor (ortanca fark 0,00002). Aynı kurallar saatlik çubukta çalıştırıldı
+(`bar_minutes: 60`), varsayılan maliyetlerle:
 
-| Senaryo | İşlem | Kazanma | Ortalama R (standart hata) | Getiri |
-|---|---|---|---|---|
-| Varsayılan maliyet | 127 | %26,8 | -0,160 (0,115) | -%9,3 |
-| Maliyetsiz | 131 | %31,3 | -0,045 (0,121) | -%7,1 |
-| Yalnız süpürme | 50 | %20,0 | -0,351 (0,202) | |
-| Yalnız geri çekilme | 100 | %31,0 | -0,062 (0,119) | |
+| Senaryo | İşlem | Kazanma | Ortalama R (standart hata) | Getiri | Azami düşüş |
+|---|---|---|---|---|---|
+| İki kurulum birlikte | 181 | %30,9 | -0,119 (0,092) | -%12,3 | -%16,9 |
+| Yalnız süpürme | 70 | %25,7 | -0,277 (0,157) | -%9,2 | -%11,8 |
+| Yalnız geri çekilme | 146 | %32,2 | -0,096 (0,096) | -%11,1 | -%15,9 |
 
-Okuma: örneklem küçük (tek parite, on ay, saatlik çubuk; hedef M15 ve dokuz enstrüman), bu yüzden
-kesin hüküm değil. Ama strateji lehine hiçbir kanıt yok ve süpürme kurulumu bu veride belirgin
-biçimde kötü. Walk-forward'da eğitimde iyi görünen ayarlar test döneminde tutmadı (12 işlem, -0,24R).
+Stop ve çıkış kuralları olmadan, sinyalden sonraki fiyat hareketine de bakıldı (olay çalışması):
+
+- **Geri çekilme sinyali:** sonraki 1-24 saatte sinyal yönünde ortalama hareket sıfır (176 sinyal).
+  Yani giriş kuralının öngörü gücü görünmüyor; kayıp maliyetlerden geliyor.
+- **Süpürme sinyali:** sonraki 4-12 saatte fiyat ortalamada sinyalin TERSİNE gitti (82 sinyal,
+  12 saatte -0,97 ATR, t = -2,1). Yön, seviye türü ve dönemin iki yarısı ayrı ayrı bakıldığında
+  hepsinde işaret aynı. Bu veride "fitilden sonra dönüş" yerine "kırılımın devamı" görülüyor.
+
+Okuma:
+
+- Örneklem sınırlı: tek parite, 13 ay, saatlik çubuk; hedef M15 ve dokuz enstrüman. 2017, EURUSD
+  için tek yönlü güçlü bir trend yılıydı. Kesin hüküm değil.
+- Yine de strateji lehine hiçbir kanıt yok, aleyhine zayıf kanıt var. Fitil bu kurallarla gerçek
+  parayla çalıştırılmamalı.
+- Süpürme sonucunu tersine çevirip "kırılım devamı" stratejisi yapmak cazip görünür ama aynı veriden
+  çıkarılmış bir kuraldır; bağımsız veride (başka pariteler, başka yıllar) sınanmadan kanıt sayılmaz.
+  Sıradaki araştırma adımı budur ve daha fazla gün içi veri gerektirir.
 
 ## Beklenti hesabı
 
