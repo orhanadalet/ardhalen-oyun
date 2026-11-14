@@ -58,7 +58,8 @@ tıklamayla sinyal modunda başlatır.
 ## Güvenlik davranışları
 
 - **Bağlantı koparsa** bot her turda yeniden bağlanmayı dener; stoplar bu sırada brokerda durur.
-- **Para çekme ya da yatırma** kâr/zarar sayılmaz: düşüş freni ve günlük kayıp sınırı buna göre ölçeklenir.
+- **Para çekme ya da yatırma** kâr/zarar sayılmaz: düşüş freni ve günlük kayıp sınırı yalnızca işlem
+  sonuçlarını izler. Akış görüldüğü an bir tarama boyunca (5 sn) yeni giriş yapılmaz.
 - **Stopsuz pozisyon** (bu bota ait) görülürse hemen kapatılır.
 - **Durum dosyası kaybolursa** açık pozisyonun stop takibi mevcut stoptan yeniden kurulur.
 - **İkinci kopya** aynı klasörde başlatılamaz (`fitil.lock`).

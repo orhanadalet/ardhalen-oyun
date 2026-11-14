@@ -28,7 +28,10 @@ class Engine:
         self.journal_path = Path(journal_path) if journal_path else None
         self.seen: dict[str, datetime] = {}
         self.state = {"day": "", "day_start_equity": 0.0, "peak_equity": 0.0, "trades_today": 0, "tickets": {},
-                      "flows_until": "", "withdraw_base": 0.0, "withdraw_week": ""}
+                      "flows_until": "", "withdraw_base": 0.0, "withdraw_week": "",
+                      # adj: para akışlarından arındırma çarpanı. "Ayarlı özkaynak" = özkaynak * adj; yalnızca
+                      # işlem kâr/zararıyla değişir. peak_equity ve day_start_equity ayarlı birimdedir.
+                      "adj": 1.0, "peak_time": "", "day_start_time": ""}
         self._warned: set[str] = set()
         if self.state_path and self.state_path.exists():
             try:
@@ -41,8 +44,8 @@ class Engine:
         for x in cfg.blackouts:
             t = datetime.fromisoformat(x)
             self._blackouts.append(t.astimezone(timezone.utc).replace(tzinfo=None) if t.tzinfo else t)
-        self._last_equity: float | None = None
-        self._hold_peak_until: datetime | None = None    # açıklanamayan özkaynak sıçraması: zirveyi bekleterek güncelle
+        self._flow_pending = False        # yeni akış görüldü; özkaynağın onu yansıttığından emin olmak için bir tur beklenir
+        self._flow_error_at: datetime | None = None
         self._last_block: dict[str, str | None] = {}
         self._close_retry: dict[int, datetime] = {}
 
@@ -55,7 +58,7 @@ class Engine:
 
     def reset_peak(self, equity: float) -> None:
         """Düşüş frenini sıfırlar: zirve = şimdiki özkaynak. Yalnızca kullanıcı isteğiyle çağrılır."""
-        self.state["peak_equity"] = equity
+        self.state["peak_equity"] = equity * self.state["adj"]
         self._save()
 
     def _journal(self, now: datetime, event: str, symbol: str = "", **kw) -> None:
@@ -69,14 +72,19 @@ class Engine:
                 w.writerow(["time_utc", "event", "symbol", "detail"])
             w.writerow([now.isoformat(), event, symbol, json.dumps(kw, ensure_ascii=False, default=str)])
 
+    def _adj(self, equity: float) -> float:
+        """Para yatırma/çekmeden arındırılmış özkaynak: yalnızca işlem kâr/zararıyla değişir."""
+        return equity * self.state["adj"]
+
     def _roll_day(self, now: datetime, equity: float) -> None:
         day = now.strftime("%Y-%m-%d")
+        adj_eq = self._adj(equity)
         changed = False
         if self.state["day"] != day:
-            self.state.update(day=day, day_start_equity=equity, trades_today=0)
+            self.state.update(day=day, day_start_equity=adj_eq, day_start_time=now.isoformat(), trades_today=0)
             changed = True
-        if equity > self.state["peak_equity"] and not (self._hold_peak_until and now < self._hold_peak_until):
-            self.state["peak_equity"] = equity
+        if adj_eq > self.state["peak_equity"]:
+            self.state.update(peak_equity=adj_eq, peak_time=now.isoformat())
             changed = True
         if self.state["withdraw_base"] <= 0:
             self.state["withdraw_base"] = equity
@@ -84,37 +92,58 @@ class Engine:
         if changed:
             self._save()
 
-    def _apply_flows(self, now: datetime, equity: float) -> None:
-        """Para yatırma/çekme özkaynağı değiştirir ama kâr/zarar değildir: zirve ve gün başı
-        özkaynağı aynı oranda ölçeklenir ki çekim, düşüş freni ya da günlük kayıp sayılmasın.
+    def _apply_flows(self, now: datetime, equity: float) -> bool:
+        """Para yatırma/çekmeyi kâr/zarardan ayırır. Dönüş: False ise bu tur özkaynak belirsizdir.
 
-        Her turda, zirve güncellenmeden ÖNCE çalışır. Akış kaydı özkaynaktan geç görünürse diye,
-        açıklanamayan ani özkaynak sıçramasında zirve güncellemesi iki dakika bekletilir.
+        Yöntem: akış f görüldüğünde çarpan adj *= (E - f) / E yapılır; böylece ayarlı özkaynak
+        (E * adj) akıştan etkilenmez. Zamanlama sorunlarına karşı:
+          - Akış ilk görüldüğü turda uygulanmaz, bir tur beklenir: özkaynak okuması akışı henüz
+            yansıtmıyor olabilir.
+          - Akış kaydı özkaynaktan GEÇ göründüyse, arada zirve ya da gün başı hayali sıçramayla
+            kaydedilmiş olabilir; kayıt zamanı akıştan sonraysa aynı çarpanla düzeltilir.
+          - Geçmiş okunamazsa tur iptal edilmez; yalnızca akış kontrolü sonraki tura kalır.
         """
         if not self.state["flows_until"]:
             self.state["flows_until"] = now.isoformat()
             self._save()
         since = datetime.fromisoformat(self.state["flows_until"])
-        flows = [(t, a) for t, a in self.broker.flows_since(since) if t > since and a]
-        if flows:
-            flow = sum(a for _, a in flows)
-            before = equity - flow
-            if before > 0 and equity > 0:
-                k = equity / before
+        try:
+            flows = [(t, a) for t, a in self.broker.flows_since(since) if t > since and a]
+        except FatalError:
+            raise
+        except Exception as e:
+            if self._flow_error_at is None or (now - self._flow_error_at).total_seconds() > 600:
+                self._flow_error_at = now
+                self._journal(now, "UYARI", "", neden="para akışı geçmişi okunamadı", hata=str(e))
+            return True
+        if not flows:
+            self._flow_pending = False
+            if now - since > timedelta(hours=6):
+                self.state["flows_until"] = (now - timedelta(hours=1)).isoformat()
+                self._save()
+            return True
+        if not self._flow_pending:
+            self._flow_pending = True
+            return False
+        self._flow_pending = False
+        flow = sum(a for _, a in flows)
+        first = min(t for t, _ in flows)
+        if equity > 0 and equity - flow > 0:
+            k = (equity - flow) / equity
+            self.state["adj"] *= k
+            pt, dt = self.state["peak_time"], self.state["day_start_time"]
+            # Hayali sıçrama düzeltmesi. Zirve yalnızca aşağı düzeltilir (para yatırma): yanlışlıkla
+            # düşürülürse hemen kendini toparlar, yanlışlıkla yükseltilirse bot durur.
+            if k < 1 and pt and datetime.fromisoformat(pt) >= first - timedelta(seconds=30):   # 30 sn: saat farkı payı
                 self.state["peak_equity"] *= k
+            if dt and datetime.fromisoformat(dt) >= first:
                 self.state["day_start_equity"] *= k
-            if flow > 0:
-                self.state["withdraw_base"] += flow
-            self.state["flows_until"] = max(t for t, _ in flows).isoformat()   # saat farkından bağımsız: son işlenen kayıt
-            self._hold_peak_until = None
-            self._journal(now, "AKIŞ", "", tutar=round(flow, 2), ozkaynak=round(equity, 2))
-            self._save()
-        elif self._last_equity and self._last_equity > 0 and equity / self._last_equity - 1.0 > 0.03:
-            self._hold_peak_until = now + timedelta(minutes=2)
-        elif now - since > timedelta(hours=6):
-            self.state["flows_until"] = (now - timedelta(hours=1)).isoformat()
-            self._save()
-        self._last_equity = equity
+        if flow > 0:
+            self.state["withdraw_base"] += flow
+        self.state["flows_until"] = max(t for t, _ in flows).isoformat()
+        self._journal(now, "AKIŞ", "", tutar=round(flow, 2), ozkaynak=round(equity, 2))
+        self._save()
+        return True
 
     def _withdraw_hint(self, now: datetime, equity: float) -> None:
         """Haftada bir: önceki zirveyi aşan kârın withdraw_frac kadarını çekim önerisi olarak yazar."""
@@ -136,7 +165,7 @@ class Engine:
     # ------------------------------------------------------------------ kapılar
     def drawdown(self, equity: float) -> float:
         peak = self.state["peak_equity"]
-        return 0.0 if peak <= 0 else max(0.0, 1.0 - equity / peak)
+        return 0.0 if peak <= 0 else max(0.0, 1.0 - self._adj(equity) / peak)
 
     def risk_factor(self, equity: float) -> float:
         """Zirveden düşüşe göre risk çarpanı: 1.0, 0.5 ya da 0 (dur)."""
@@ -154,7 +183,7 @@ class Engine:
         if not c.entry_hours[0] <= now.hour < c.entry_hours[1]:
             return "seans dışı"
         start = self.state["day_start_equity"]
-        if start > 0 and (start - equity) / start >= c.daily_loss_limit:
+        if start > 0 and (start - self._adj(equity)) / start >= c.daily_loss_limit:
             return "günlük kayıp sınırı"
         if self.risk_factor(equity) == 0.0:
             return "düşüş freni: sistem durdu"
@@ -179,12 +208,15 @@ class Engine:
         b.heartbeat()
         now = b.now()
         acct = b.account()
-        self._apply_flows(now, acct.equity)
-        self._roll_day(now, acct.equity)
+        settled = self._apply_flows(now, acct.equity)
+        if settled or not self.state["day"]:
+            self._roll_day(now, acct.equity)
         positions = b.positions()
 
         for p in [p for p in positions if p.sl <= 0]:        # güvenlik: stopsuz pozisyon tutulmaz
-            self._journal(now, "UYARI", p.symbol, ticket=p.ticket, neden="stopsuz pozisyon kapatılıyor")
+            retry = self._close_retry.get(p.ticket)
+            if not (retry and now < retry):
+                self._journal(now, "UYARI", p.symbol, ticket=p.ticket, neden="stopsuz pozisyon kapatılıyor")
             self._close(now, p, "stopsuz pozisyon")
         if any(p.sl <= 0 for p in positions) and not self.dry_run:
             positions = b.positions()
@@ -232,6 +264,8 @@ class Engine:
                 continue
             if (now - closed_at).total_seconds() > c.max_signal_age_sec:
                 continue                     # bot geç başladı: eski çubuğa girme
+            if not settled:
+                continue                     # para akışı işleniyor: özkaynak netleşene kadar giriş yok
             block = self.entry_block(now, acct.equity, len(positions), sym, since=last)
             if block != self._last_block.get(sym):
                 self._last_block[sym] = block

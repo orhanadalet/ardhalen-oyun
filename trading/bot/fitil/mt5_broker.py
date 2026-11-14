@@ -47,6 +47,7 @@ class MT5Broker:
         self._offset = timedelta(0)
         self._offset_at = time.time()
         self._newest_tick = 0.0
+        self._hb_at = time.time()
         if cfg.server_time is not None:
             from .events import _zone
             self._zone = _zone(cfg.server_time["tz"])
@@ -116,7 +117,11 @@ class MT5Broker:
             raise FatalError("Hesap artık DEMO değil. Fitil durduruluyor.")
         if self._zone is None and self.cfg.server_utc_offset_hours is None:
             newest = self._newest_tick_time()
-            live = newest > self._newest_tick                 # son turdan beri yeni tick geldi: fiyat akıyor
+            wall = time.time()
+            # Canlı = bir önceki tur az önceydi VE o turdan beri yeni tick geldi. Uyku/kesinti sonrası
+            # ilk turda eski bir tick "yeni" görünebilir; o tur sayılmaz.
+            live = newest > self._newest_tick and wall - self._hb_at < 30
+            self._hb_at = wall
             self._newest_tick = max(newest, self._newest_tick)
             if live and time.time() - self._offset_at > 3600:
                 self._offset_at = time.time()

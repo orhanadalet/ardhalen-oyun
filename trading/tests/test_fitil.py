@@ -402,16 +402,24 @@ class Hardening(unittest.TestCase):
         self.df, _ = with_sweep_low(m15())
         self.logs = []
 
+    def _settle_flows(self, e, b):
+        """Akış ilk görüldüğü turda bekletilir, ikinci turda uygulanır."""
+        self.assertFalse(e._apply_flows(b.now(), b.account().equity))
+        self.assertTrue(e._apply_flows(b.now(), b.account().equity))
+
     def test_withdrawal_does_not_trigger_drawdown_brake_or_daily_limit(self):
         b = at_end(self.df)
         e = Engine(b, cfg(), log=self.logs.append)
         e.state.update(day=b.now().strftime("%Y-%m-%d"), day_start_equity=10_000.0, peak_equity=10_000.0,
                        flows_until=(b.now() - timedelta(hours=1)).isoformat(), withdraw_base=10_000.0)
         b.deposit(-5_000.0)                                # hesabın yarısı çekildi
-        e.step()
-        self.assertAlmostEqual(e.state["peak_equity"], 5_000.0, delta=1.0)
+        self._settle_flows(e, b)
+        self.assertEqual(e.drawdown(b.account().equity), 0.0)
         self.assertEqual(e.risk_factor(b.account().equity), 1.0)
+        e.step()
         self.assertEqual(len(b.positions()), 1)            # işlem hâlâ açılabiliyor
+        p = b.positions()[0]
+        self.assertLessEqual((p.entry - p.sl) * p.lots * 100_000, 5_000 * 0.01 + 1e-6)   # lot YENİ özkaynağa göre
         self.assertTrue(any("AKIŞ" in x for x in self.logs))
 
     def test_real_loss_still_triggers_brake_after_withdrawal(self):
@@ -421,9 +429,18 @@ class Hardening(unittest.TestCase):
                        flows_until=(b.now() - timedelta(hours=1)).isoformat(), withdraw_base=12_500.0)
         b.balance = 12_000.0                               # önce 12.500 -> 12.000 gerçek kayıp (-%4)
         b.deposit(-2_000.0)                                # sonra 2.000 çekim
+        self._settle_flows(e, b)
+        self.assertAlmostEqual(e.drawdown(b.account().equity), 0.04, delta=0.001)
         e.step()
-        self.assertAlmostEqual(e.drawdown(b.account().equity), 0.04, delta=0.002)
         self.assertEqual(b.positions(), [])                # günlük kayıp sınırı (%3) hâlâ geçerli
+
+    def test_signal_during_pending_flow_is_not_traded(self):
+        b = at_end(self.df)
+        e = Engine(b, cfg(), log=self.logs.append)
+        e.state.update(flows_until=(b.now() - timedelta(hours=1)).isoformat())
+        b.deposit(3_000.0)
+        e.step()                                           # akış bu turda ilk kez görüldü
+        self.assertEqual(b.positions(), [])
 
     def test_position_without_stop_is_closed(self):
         b = at_end(self.df)
@@ -533,39 +550,112 @@ class ReviewFixes(unittest.TestCase):
         self.df, self.pdl = with_sweep_low(m15())
         self.logs = []
 
-    def test_deposit_with_fast_scans_is_not_double_counted(self):
+    def _clocked(self, **kw):
         b = at_end(self.df)
         clock = [b.now()]
         b.now = lambda: clock[0]
-        e = Engine(b, cfg(), log=self.logs.append, dry_run=True)
+        e = Engine(b, cfg(), log=self.logs.append, dry_run=True, **kw)
         e.step()
-        clock[0] += timedelta(seconds=5)
-        b._flows.append((clock[0], 10_000.0))              # 10.000 yatırıldı
-        b.balance += 10_000.0
-        for _ in range(30):                                 # 5 sn aralıkla 30 tur
-            e.step()
-            clock[0] += timedelta(seconds=5)
-        self.assertAlmostEqual(e.state["peak_equity"], 20_000.0, delta=1.0)
-        self.assertEqual(e.risk_factor(b.account().equity), 1.0)
-        self.assertEqual(sum("AKIŞ" in x for x in self.logs), 1)
 
-    def test_late_visible_deposit_does_not_inflate_peak(self):
+        def scans(n, engine=None):
+            for _ in range(n):
+                clock[0] += timedelta(seconds=5)
+                (engine or e).step()
+        return b, e, clock, scans
+
+    def assert_clean(self, e, b, msg=""):
+        eq = b.account().equity
+        self.assertAlmostEqual(e.drawdown(eq), 0.0, places=6, msg=msg)
+        self.assertEqual(e.risk_factor(eq), 1.0, msg)
+        self.assertIsNone(e.entry_block(b.now().replace(hour=9), eq, 0), msg)
+
+    def test_deposit_with_fast_scans_is_not_double_counted(self):
+        b, e, clock, scans = self._clocked()
+        clock[0] += timedelta(seconds=2)
+        b.deposit(10_000.0)                                  # 10.000 yatırıldı, kayıt hemen görünür
+        scans(30)
+        self.assert_clean(e, b)
+        self.assertEqual(sum("AKIŞ" in x for x in self.logs), 1)
+        self.assertAlmostEqual(e.state["adj"], 0.5)
+
+    def test_flow_record_visible_before_equity_reflects_it(self):
+        b, e, clock, scans = self._clocked()
+        b._flows.append((clock[0] + timedelta(seconds=1), 5_000.0))   # kayıt göründü, özkaynak henüz 10.000
+        scans(1)
+        b.balance += 5_000.0                                           # özkaynak bir sonraki turda güncellendi
+        scans(10)
+        self.assert_clean(e, b)
+
+    def test_flow_record_visible_long_after_equity(self):
+        for lag_scans, amount in ((4, 10_000.0), (40, 3_000.0), (40, -4_000.0)):   # 20 sn ve 200 sn gecikme
+            self.logs.clear()
+            b, e, clock, scans = self._clocked()
+            t = clock[0] + timedelta(seconds=1)
+            b.balance += amount                              # özkaynak değişti, kayıt henüz yok
+            scans(lag_scans)
+            b._flows.append((t, amount))
+            scans(5)
+            self.assert_clean(e, b, f"gecikme={lag_scans} tutar={amount}")
+
+    def test_restart_while_flow_record_is_lagging(self):
+        with tempfile.TemporaryDirectory() as d:
+            sp = Path(d) / "s.json"
+            b, e, clock, scans = self._clocked(state_path=sp)
+            t = clock[0] + timedelta(seconds=1)
+            b.balance += 3_000.0
+            scans(3)
+            e2 = Engine(b, cfg(), log=self.logs.append, dry_run=True, state_path=sp)   # yeniden başlatma
+            scans(3, e2)
+            b._flows.append((t, 3_000.0))
+            scans(5, e2)
+            self.assert_clean(e2, b)
+
+    def test_lagging_flow_across_utc_midnight_does_not_block_the_day(self):
+        b, e, clock, scans = self._clocked()
+        clock[0] = clock[0].replace(hour=23, minute=59, second=50)
+        scans(1)                                             # 23:59:55: gün başı zaten kayıtlı
+        t = clock[0] + timedelta(seconds=1)
+        b.balance += 600.0                                   # 23:59:56 para yatırıldı
+        scans(3)                                             # gece yarısı geçildi, gün başı hayali özkaynakla kaydedildi
+        b._flows.append((t, 600.0))
+        scans(4)
+        self.assertAlmostEqual(e.state["day_start_equity"], e._adj(b.account().equity), delta=0.01)
+        self.assert_clean(e, b)
+
+    def test_real_gain_and_loss_are_not_mistaken_for_flows(self):
+        b, e, clock, scans = self._clocked()
+        b.balance += 400.0                                   # gerçek kâr: akış kaydı yok
+        scans(3)
+        self.assertAlmostEqual(e.state["peak_equity"], 10_400.0, delta=0.01)
+        clock[0] += timedelta(minutes=10)
+        b.balance -= 1_300.0                                 # gerçek kayıp: zirveden %12,5
+        scans(3)
+        self.assertAlmostEqual(e.drawdown(b.account().equity), 0.125, delta=0.001)
+        self.assertEqual(e.risk_factor(b.account().equity), 0.5)
+        clock[0] += timedelta(minutes=10)
+        b.deposit(5_000.0)                                   # para yatırmak düşüşü silmez
+        scans(4)
+        self.assertAlmostEqual(e.drawdown(b.account().equity), 0.125, delta=0.001)
+        self.assertEqual(sum("AKIŞ" in x for x in self.logs), 1)
+        clock[0] += timedelta(minutes=10)
+        b.deposit(-6_000.0)                                  # para çekmek de düşüşü değiştirmez
+        scans(4)
+        self.assertAlmostEqual(e.drawdown(b.account().equity), 0.125, delta=0.001)
+
+    def test_flow_history_failure_does_not_stop_day_end_close(self):
         b = at_end(self.df)
-        clock = [b.now()]
+        b.market_order("EURUSD", 1, 0.1, 1.0, "t")
+        clock = [b.now().replace(hour=20, minute=0)]
         b.now = lambda: clock[0]
-        e = Engine(b, cfg(), log=self.logs.append, dry_run=True)
+
+        def boom(since):
+            raise RuntimeError("geçmiş okunamadı")
+        b.flows_since = boom
+        e = Engine(b, cfg(), log=self.logs.append)
         e.step()
-        t_dep = clock[0] + timedelta(seconds=5)
-        b.balance += 10_000.0                               # özkaynak arttı ama kayıt henüz görünmüyor
-        for _ in range(4):
-            clock[0] += timedelta(seconds=5)
-            e.step()
-        self.assertAlmostEqual(e.state["peak_equity"], 10_000.0, delta=1.0)   # zirve bekletildi
-        b._flows.append((t_dep, 10_000.0))                  # kayıt 20 sn sonra göründü
-        clock[0] += timedelta(seconds=5)
+        self.assertEqual(b.positions(), [])                  # pozisyon yine de kapatıldı
         e.step()
-        self.assertAlmostEqual(e.state["peak_equity"], 20_000.0, delta=1.0)
-        self.assertEqual(e.drawdown(b.account().equity), 0.0)
+        self.assertEqual(sum("para akışı geçmişi okunamadı" in x for x in self.logs), 1)   # uyarı tekrarlanmaz
 
     def test_failed_order_result_but_open_position_is_still_tracked(self):
         b = at_end(self.df)
@@ -644,13 +734,21 @@ class ReviewFixes(unittest.TestCase):
         self.assertEqual(len(calls), 2)
 
     def test_block_reason_is_journaled_once(self):
-        b = at_end(self.df)
+        df = self.df
+        idx = pd.date_range(df.index[-1] + pd.Timedelta(minutes=15), periods=6, freq="15min")
+        tail = pd.DataFrame({"open": df.close.iloc[-1], "high": df.close.iloc[-1] + 0.0001,
+                             "low": df.close.iloc[-1] - 0.0001, "close": df.close.iloc[-1]}, index=idx)
+        b = paper(pd.concat([df, tail]), start=idx[0])
         e = Engine(b, cfg(), log=self.logs.append)
         e.state.update(day=b.now().strftime("%Y-%m-%d"), day_start_equity=10_000.0, peak_equity=13_000.0,
                        flows_until=b.now().isoformat(), withdraw_base=13_000.0)
-        e.step()
+        for _ in range(5):                                   # beş ayrı çubuk değerlendirilir
+            e.step()
+            b.advance()
+        self.assertEqual(len(e.seen), 1)
+        self.assertGreater(b.clock, idx[3])
         hits = [x for x in self.logs if "ENGEL" in x]
-        self.assertEqual(len(hits), 1)
+        self.assertEqual(len(hits), 1)                       # aynı neden yalnızca bir kez yazılır
         self.assertIn("düşüş freni", hits[0])
 
     def test_state_file_is_atomic_and_corruption_is_survivable(self):
@@ -683,6 +781,17 @@ class ReviewFixes(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             MT5Broker(cfg(), sleep=lambda x: None, mt5=m)
         MT5Broker(cfg(server_utc_offset_hours=2), sleep=lambda x: None, mt5=m)      # elle ayarla başlar
+
+    def test_offset_not_refreshed_from_old_tick_after_suspend(self):
+        m = fake_mt5(server_offset_h=3)
+        b = MT5Broker(cfg(), sleep=lambda x: None, mt5=m)
+        self.assertEqual(b._offset, timedelta(hours=3))
+        b._offset_at -= 7200                                 # saatlik yenileme zamanı gelmiş
+        b._hb_at -= 7200                                     # ama önceki tur 2 saat önceydi (uyku/kesinti)
+        m.tick_age = 7190.0                                  # elde yalnızca 2 saatlik eski tick var
+        b._newest_tick -= 9000
+        b.heartbeat()
+        self.assertEqual(b._offset, timedelta(hours=3))      # eski tick'ten yeni fark türetilmedi
 
     def test_switching_to_real_account_stops_the_bot(self):
         m = fake_mt5()
