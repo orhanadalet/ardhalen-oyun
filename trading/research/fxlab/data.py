@@ -33,6 +33,30 @@ def load_mt5_csv(path: str | Path) -> pd.DataFrame:
     return out
 
 
+FRED_SERIES = {   # FRED günlük serileri: tek fiyat (New York öğlen kuru / spot), OHLC yok
+    "EURUSD": "DEXUSEU", "GBPUSD": "DEXUSUK", "AUDUSD": "DEXUSAL", "NZDUSD": "DEXUSNZ",
+    "USDJPY": "DEXJPUS", "USDCHF": "DEXSZUS", "USDCAD": "DEXCAUS",
+    "WTI": "DCOILWTICO", "BRENT": "DCOILBRENTEU",
+}
+
+
+def load_fred_csv(path: str | Path) -> pd.DataFrame:
+    """FRED 'fredgraph.csv' dosyasını okur. Günde tek fiyat olduğu için open=high=low=close.
+
+    Sonuç: sinyaller ve stoplar yalnızca günlük fiyat üzerinden çalışır (gün içi stop yok),
+    ATR kapanıştan kapanışa değişimin ortalamasıdır. Boş ve sıfır/negatif gözlemler atılır
+    (ör. WTI spot fiyatının eksiye düştüğü 2020-04-20).
+    """
+    df = pd.read_csv(path)
+    price = pd.to_numeric(df.iloc[:, 1], errors="coerce")
+    price.index = pd.to_datetime(df.iloc[:, 0])
+    price = price[price > 0].dropna().sort_index()
+    out = pd.DataFrame({c: price for c in COLS})
+    out.index.name = "time"
+    validate(out, str(path))
+    return out
+
+
 def validate(df: pd.DataFrame, name: str = "veri") -> None:
     if df.empty:
         raise ValueError(f"{name}: boş")
