@@ -125,6 +125,10 @@ Geri çekilme kurulumunun 2019-20 M15 sonucunun sağlamlığı:
 - Yeniden örnekleme (bootstrap): ortalama R'nin sıfırdan büyük olma olasılığı %91; %90 aralığı
   [-0,03R, +0,32R]. Yani olumlu ama istatistiksel olarak kanıtlanmış değil.
 
+Walk-forward (2019-20 M15; stop parametreleri 120 günlük geçmişte seçilip sonraki görülmemiş 30 günde
+sınandı): 8 dilimin 7'si pozitif, toplam 103 örnek dışı işlemde ortalama +0,21R (std. hata 0,15).
+Yön tutarlı, ama işlem sayısı kesin hüküm için hâlâ az.
+
 Okuma:
 
 - **Süpürme kurulumu** hiçbir dönemde kazandırmadı. 2017 verisinde sinyalden sonraki 4-12 saatte fiyat
