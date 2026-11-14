@@ -40,32 +40,46 @@ def main() -> None:
                     help="düşüş frenini sıfırla (zirve = şimdiki özkaynak). %%20 durmasından sonra, nedeni inceledikten sonra kullanın")
     a = ap.parse_args()
 
-    cfg = Config.load(a.config)
+    try:
+        cfg = Config.load(a.config)
+    except FileNotFoundError:
+        raise SystemExit(f"Yapılandırma dosyası bulunamadı: {a.config}  (config.example.json dosyasını kopyalayın)")
+    except (ValueError, TypeError, KeyError) as e:
+        raise SystemExit(f"Yapılandırma hatası ({a.config}): {e}")
     work = Path(a.workdir)
     work.mkdir(parents=True, exist_ok=True)
-    lock = acquire_lock(work / "fitil.lock")       # noqa: F841  (süreç boyunca açık kalmalı)
-    from .mt5_broker import MT5Broker
-    broker = MT5Broker(cfg, allow_real=a.allow_real)
-    if a.trade and not broker.trading_enabled():
-        broker.shutdown()
-        raise SystemExit("MT5'te 'Algo Trading' kapalı. Araç çubuğundaki düğmeyi etkinleştirip yeniden başlatın.")
-    acct = broker.account()
-    mode = "EMİR GÖNDERİR" if a.trade else "yalnızca sinyal (dry-run)"
-    print(f"Hesap: {'DEMO' if acct.is_demo else 'GERÇEK'}  özkaynak={acct.equity:.2f} {acct.currency}  mod: {mode}")
-    engine = Engine(broker, cfg, state_path=work / "fitil_state.json", journal_path=work / "fitil_journal.csv",
-                    dry_run=not a.trade)
-    if a.reset_peak:
-        engine.reset_peak(acct.equity)
-        print(f"Düşüş freni sıfırlandı: zirve = {acct.equity:.2f}")
+    lock = acquire_lock(work / "fitil.lock")       # süreç boyunca açık kalmalı
+    broker = None
     try:
-        engine.run()
-    except KeyboardInterrupt:
-        print("Durduruldu. Açık pozisyonlar ve stopları brokerda duruyor.")
-    except FatalError as e:
-        print(f"FİTİL DURDU: {e}\nAçık pozisyonlar ve stopları brokerda duruyor.")
+        try:
+            from .mt5_broker import MT5Broker
+            broker = MT5Broker(cfg, allow_real=a.allow_real)
+        except ImportError:
+            raise SystemExit("MetaTrader5 paketi yok. Windows'ta: pip install -r requirements.txt")
+        except (FatalError, RuntimeError) as e:
+            raise SystemExit(f"Fitil başlatılamadı: {e}")
+        if a.trade and not broker.trading_enabled():
+            raise SystemExit("MT5'te 'Algo Trading' kapalı. Araç çubuğundaki düğmeyi etkinleştirip yeniden başlatın.")
+        acct = broker.account()
+        mode = "EMİR GÖNDERİR" if a.trade else "yalnızca sinyal (dry-run)"
+        print(f"Hesap: {'DEMO' if acct.is_demo else 'GERÇEK'}  özkaynak={acct.equity:.2f} {acct.currency}  mod: {mode}")
+        print(f"Semboller: {', '.join(cfg.symbols)}  zaman dilimi: M{cfg.strategy.bar_minutes}  "
+              f"kurulumlar: {', '.join(cfg.strategy.setups)}")
+        engine = Engine(broker, cfg, state_path=work / "fitil_state.json", journal_path=work / "fitil_journal.csv",
+                        dry_run=not a.trade)
+        if a.reset_peak:
+            engine.reset_peak(acct.equity)
+            print(f"Düşüş freni sıfırlandı: zirve = {acct.equity:.2f}")
+        try:
+            engine.run()
+        except KeyboardInterrupt:
+            print("Durduruldu. Açık pozisyonlar ve stopları brokerda duruyor.")
+        except FatalError as e:
+            print(f"FİTİL DURDU: {e}\nAçık pozisyonlar ve stopları brokerda duruyor.")
     finally:
-        broker.shutdown()
-
+        if broker is not None:
+            broker.shutdown()
+        lock.close()
 
 if __name__ == "__main__":
     main()

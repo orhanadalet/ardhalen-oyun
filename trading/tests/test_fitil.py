@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bot"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from fitil.broker import FatalError, PaperBroker, Pos, Spec, round_lots_down   # noqa: E402
 from fitil.config import Config, StrategyParams                    # noqa: E402
@@ -973,6 +974,207 @@ class Timeframes(unittest.TestCase):
         ep = lambda t: (pd.Timestamp(t) - pd.Timestamp("1970-01-01")).total_seconds()
         for t in ("2024-03-10 09:30", "2024-03-08 12:00", "2024-11-03 08:30", "2024-07-01 00:15"):   # yaz saati geçişleri dahil
             self.assertEqual(pd.Timestamp(b._utc(ep(t))), b._utc_index([ep(t)])[0], t)
+
+
+class LivePathAgainstSimulatedTerminal(unittest.TestCase):
+    """Canlı kod yolu (MT5Broker + Engine), MT5 arayüzünü taklit eden simülatöre karşı baştan sona çalıştırılır
+    ve aynı verideki doğrudan simülasyonla karşılaştırılır. Sunucu saati UTC'den farklıdır ve dönem bir
+    yaz saati geçişini içerir; zaman dönüşümünde bir saatlik hata işlemleri değiştirir."""
+
+    def data(self, seed=21, start="2024-02-26", days=26, p0=1.10, vol=0.0004):
+        rng = np.random.default_rng(seed)
+        idx = pd.date_range(start, periods=96 * days, freq="15min")
+        idx = idx[(idx.weekday < 5) | ((idx.weekday == 6) & (idx.hour >= 22))]
+        c = p0 * np.exp(np.cumsum(rng.standard_t(4, len(idx)) * vol))
+        o = np.concatenate([[p0], c[:-1]])
+        w = np.abs(rng.normal(0, vol * 0.7, (2, len(idx)))) * p0
+        return pd.DataFrame({"open": o, "high": np.maximum(o, c) + w[0], "low": np.minimum(o, c) - w[1], "close": c}, index=idx)
+
+    def brokers(self):
+        from mt5_sim import SimMT5
+        data = {"EURUSD": self.data(21), "USDJPY": self.data(22, p0=150.0)}
+        specs = {"EURUSD": SPEC, "USDJPY": Spec("USDJPY", 3, 0.001, 0.01, 0.01, 100.0)}
+
+        def make():
+            return PaperBroker(data, specs, {"EURUSD": 1e5, "USDJPY": 1e5}, {"EURUSD": "quote", "USDJPY": "base"},
+                               {"EURUSD": 0.00008, "USDJPY": 0.010}, equity=10_000.0, commission_per_lot=7.0,
+                               start=data["EURUSD"].index[700])
+        return make, SimMT5
+
+    def conf(self, **kw):
+        c = Config(symbols={"EURUSD": {"usd_beta": -1}, "USDJPY": {"usd_beta": 1}}, settle_sec=0.0,
+                   strategy=SP(), **kw)
+        c.validate()
+        return c
+
+    def drive(self, engine, paper, hook=None):
+        n = 0
+        while True:
+            engine.step()
+            n += 1
+            if hook:
+                hook(n)
+            if not paper.advance():
+                break
+        return pd.DataFrame(paper.closed)
+
+    def test_live_path_reproduces_direct_simulation_trade_for_trade(self):
+        make, SimMT5 = self.brokers()
+        direct = make()
+        ref = self.drive(Engine(direct, self.conf(), log=lambda *_: None), direct)
+
+        paper = make()
+        sim = SimMT5(paper, expected_timeframe=15)
+        cfg_live = self.conf(server_time={"tz": "America/New_York", "plus_hours": 7})
+        logs = []
+        live = MT5Broker(cfg_live, mt5=sim, sleep=lambda x: None, clock=paper.now)
+        got = self.drive(Engine(live, cfg_live, log=logs.append), paper)
+
+        self.assertGreater(len(ref), 15)
+        self.assertEqual(len(got), len(ref))
+        for col in ("symbol", "direction", "reason"):
+            self.assertEqual(list(got[col]), list(ref[col]), col)
+        for col in ("lots", "entry", "exit", "pnl"):
+            np.testing.assert_allclose(got[col].to_numpy(dtype=float), ref[col].to_numpy(dtype=float), rtol=0, atol=1e-9, err_msg=col)
+        self.assertEqual(list(pd.to_datetime(got.open_time)), list(pd.to_datetime(ref.open_time)))
+        self.assertEqual(set(ref.symbol), {"EURUSD", "USDJPY"})
+        self.assertTrue({"stop", "kapat"} <= set(ref.reason))
+        self.assertFalse([x for x in logs if "HATA" in x or "RED" in x])
+        self.assertAlmostEqual(paper.account().equity, direct.account().equity, places=6)
+        entries = [r for r in sim.requests if r["action"] == sim.TRADE_ACTION_DEAL and "position" not in r]
+        self.assertTrue(all(r["sl"] > 0 and r["magic"] == cfg_live.magic for r in entries))     # her emir stoplu
+        self.assertTrue(any(r["action"] == sim.TRADE_ACTION_SLTP for r in sim.requests))        # stop taşıma da çalıştı
+
+    def test_wrong_server_time_setting_is_detectable(self):
+        # Sunucu saati yanlış tanımlanırsa (NY+7 yerine sabit UTC+0) sonuç doğrudan simülasyondan sapar:
+        # yani üstteki eşleşme, zaman dönüşümü doğru olduğu için tutuyor.
+        make, SimMT5 = self.brokers()
+        direct = make()
+        ref = self.drive(Engine(direct, self.conf(), log=lambda *_: None), direct)
+        paper = make()
+        cfg_bad = self.conf(server_utc_offset_hours=0)
+        live = MT5Broker(cfg_bad, mt5=SimMT5(paper), sleep=lambda x: None, clock=paper.now)
+        got = self.drive(Engine(live, cfg_bad, log=lambda *_: None), paper)
+        same = len(got) == len(ref) and list(pd.to_datetime(got.open_time)) == list(pd.to_datetime(ref.open_time))
+        self.assertFalse(same)
+
+    def test_live_path_ignores_other_magic_and_survives_read_errors(self):
+        make, SimMT5 = self.brokers()
+        paper = make()
+        sim = SimMT5(paper)
+        cfg_live = self.conf(server_time={"tz": "America/New_York", "plus_hours": 7})
+        live = MT5Broker(cfg_live, mt5=sim, sleep=lambda x: None, clock=paper.now)
+        manual = paper.market_order("EURUSD", 1, 0.05, 0.5, "elle")          # başka kaynaktan (magic 0) pozisyon
+        engine = Engine(live, cfg_live, log=lambda *_: None)
+        errors = []
+
+        def hook(n):
+            sim.fail_positions = (n % 50 == 49)                              # ara sıra okuma hatası
+
+        def step():
+            try:
+                engine_step()
+            except RuntimeError as e:
+                errors.append(str(e))
+        engine_step, engine.step = engine.step, step
+        self.drive(engine, paper, hook)
+        self.assertGreater(len(errors), 3)                                   # hatalar yükseltildi, yutulmadı
+        self.assertIn(manual.ticket, [p.ticket for p in paper.positions()])  # botun olmayan pozisyona dokunulmadı
+        mine = [t for t in paper.closed if t["ticket"] != manual.ticket]
+        self.assertGreater(len(mine), 10)
+        by_symbol_time = {}
+        for t in sorted(mine, key=lambda x: x["open_time"]):                 # aynı sembolde üst üste binen pozisyon yok
+            last = by_symbol_time.get(t["symbol"])
+            if last is not None:
+                self.assertGreaterEqual(pd.Timestamp(t["open_time"]), pd.Timestamp(last))
+            by_symbol_time[t["symbol"]] = t["close_time"]
+
+
+class CommandLine(unittest.TestCase):
+    """`python -m fitil` giriş noktası: yapılandırma, kilit, demo kontrolü ve döngü kurulumu."""
+
+    def run_main(self, argv, sim, steps=3):
+        import contextlib
+        import io
+        from unittest import mock
+        import fitil.__main__ as cli
+        ran = []
+
+        def fake_run(engine):
+            for _ in range(steps):
+                engine.step()
+            ran.append(engine)
+        out = io.StringIO()
+        with mock.patch.dict(sys.modules, {"MetaTrader5": sim}), mock.patch.object(Engine, "run", fake_run), \
+                mock.patch.object(sys, "argv", ["fitil"] + argv), contextlib.redirect_stdout(out):
+            try:
+                cli.main()
+                code = 0
+            except SystemExit as e:
+                code = e.code
+        return out.getvalue(), code, ran
+
+    def setup_files(self, d, **extra):
+        from mt5_sim import SimMT5
+        df = m15(900)
+        paper = PaperBroker({"EURUSD": df}, {"EURUSD": SPEC}, {"EURUSD": 1e5}, {"EURUSD": "quote"}, {"EURUSD": SPREAD},
+                            equity=5_000.0, start=df.index[-1])
+        conf = {"symbols": {"EURUSD": {"usd_beta": -1}}, "server_time": {"tz": "America/New_York", "plus_hours": 7}}
+        conf.update(extra)
+        path = Path(d) / "config.json"
+        path.write_text(json.dumps(conf), encoding="utf-8")
+        return SimMT5(paper), path
+
+    def test_starts_in_signal_mode_on_demo_and_writes_state(self):
+        with tempfile.TemporaryDirectory() as d:
+            sim, path = self.setup_files(d)
+            out, code, ran = self.run_main(["--config", str(path), "--workdir", d], sim)
+            self.assertEqual(code, 0, out)
+            self.assertIn("Hesap: DEMO", out)
+            self.assertIn("dry-run", out)
+            self.assertEqual(len(ran), 1)
+            self.assertTrue(ran[0].dry_run)
+            self.assertTrue((Path(d) / "fitil_state.json").exists())
+            self.assertFalse([r for r in sim.requests])                      # sinyal modunda emir yok
+
+    def test_trade_flag_and_reset_peak(self):
+        with tempfile.TemporaryDirectory() as d:
+            sim, path = self.setup_files(d)
+            (Path(d) / "fitil_state.json").write_text(json.dumps({"peak_equity": 9_999.0, "adj": 1.0}), encoding="utf-8")
+            out, code, ran = self.run_main(["--config", str(path), "--workdir", d, "--trade", "--reset-peak"], sim)
+            self.assertEqual(code, 0, out)
+            self.assertFalse(ran[0].dry_run)
+            self.assertIn("EMİR GÖNDERİR", out)
+            self.assertAlmostEqual(ran[0].state["peak_equity"], 5_000.0)
+
+    def test_refuses_real_account_and_bad_config_with_clear_message(self):
+        with tempfile.TemporaryDirectory() as d:
+            sim, path = self.setup_files(d)
+            sim.demo = False
+            out, code, ran = self.run_main(["--config", str(path), "--workdir", d], sim)
+            self.assertIn("DEMO hesap değil", str(code))                     # ham hata dökümü değil, açık mesaj
+            self.assertEqual(ran, [])
+            out, code, ran = self.run_main(["--config", str(path), "--workdir", d, "--allow-real"], sim)
+            self.assertIn("Hesap: GERÇEK", out)
+            sim2, bad = self.setup_files(d, risk_tiers={"1": 0.2})
+            out, code, ran = self.run_main(["--config", str(bad), "--workdir", d], sim2)
+            self.assertIn("Yapılandırma hatası", str(code))
+            out, code, ran = self.run_main(["--config", str(Path(d) / "yok.json"), "--workdir", d], sim2)
+            self.assertIn("bulunamadı", str(code))
+            sim3, p3 = self.setup_files(d, symbols={"XAUUSD.m": {"usd_beta": -1}})
+            out, code, ran = self.run_main(["--config", str(p3), "--workdir", d], sim3)
+            self.assertIn("Sembol bulunamadı: XAUUSD.m", str(code))
+
+    def test_second_instance_in_same_folder_is_refused(self):
+        import fitil.__main__ as cli
+        with tempfile.TemporaryDirectory() as d:
+            first = cli.acquire_lock(Path(d) / "fitil.lock")
+            try:
+                with self.assertRaises(SystemExit):
+                    cli.acquire_lock(Path(d) / "fitil.lock")
+            finally:
+                first.close()
+            cli.acquire_lock(Path(d) / "fitil.lock").close()               # kilit bırakılınca yeniden alınabilir
 
 
 class Plan(unittest.TestCase):

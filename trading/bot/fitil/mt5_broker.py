@@ -26,10 +26,12 @@ EPOCH = datetime(1970, 1, 1)
 
 
 class MT5Broker:
-    def __init__(self, cfg: Config, allow_real: bool = False, mt5=None, sleep=time.sleep):
+    def __init__(self, cfg: Config, allow_real: bool = False, mt5=None, sleep=time.sleep, clock=None):
         if mt5 is None:
             import MetaTrader5 as mt5          # noqa: N813  (yalnızca Windows)
         self.mt5, self.cfg, self.allow_real, self._sleep = mt5, cfg, allow_real, sleep
+        # clock: naive UTC "şimdi" döndüren fonksiyon. Canlıda sistem saati; testte/simülasyonda enjekte edilir.
+        self._clock = clock or (lambda: datetime.now(timezone.utc).replace(tzinfo=None))
         if not mt5.initialize():
             raise RuntimeError(f"MT5 başlatılamadı: {mt5.last_error()}")
         info = mt5.account_info()
@@ -45,9 +47,9 @@ class MT5Broker:
         self._zone = None
         self._plus = timedelta(0)
         self._offset = timedelta(0)
-        self._offset_at = time.time()
+        self._offset_at = self._wall()
         self._newest_tick = 0.0
-        self._hb_at = time.time()
+        self._hb_at = self._wall()
         if cfg.server_time is not None:
             from .events import _zone
             self._zone = _zone(cfg.server_time["tz"])
@@ -71,7 +73,7 @@ class MT5Broker:
 
     def _offset_from(self, live_tick_time: float) -> timedelta:
         """Canlı (az önce gelmiş) bir tick'in sunucu saatinden sunucu-UTC farkı. 30 dakikaya yuvarlanır."""
-        diff = live_tick_time - time.time()
+        diff = live_tick_time - self._wall()
         snapped = round(diff / 1800) * 1800
         if abs(diff - snapped) > 120 or not -12 * 3600 <= snapped <= 14 * 3600:
             raise RuntimeError(f"Sunucu saat farkı tutarsız ({diff:.0f} sn). "
@@ -115,14 +117,14 @@ class MT5Broker:
             raise FatalError("Hesap artık DEMO değil. Fitil durduruluyor.")
         if self._zone is None and self.cfg.server_utc_offset_hours is None:
             newest = self._newest_tick_time()
-            wall = time.time()
+            wall = self._wall()
             # Canlı = bir önceki tur az önceydi VE o turdan beri yeni tick geldi. Uyku/kesinti sonrası
             # ilk turda eski bir tick "yeni" görünebilir; o tur sayılmaz.
             live = newest > self._newest_tick and wall - self._hb_at < 30
             self._hb_at = wall
             self._newest_tick = max(newest, self._newest_tick)
-            if live and time.time() - self._offset_at > 3600:
-                self._offset_at = time.time()
+            if live and self._wall() - self._offset_at > 3600:
+                self._offset_at = self._wall()
                 try:
                     self._offset = self._offset_from(newest)
                 except RuntimeError:
@@ -135,7 +137,7 @@ class MT5Broker:
     def flows_since(self, since: datetime) -> list[tuple[datetime, float]]:
         """since (UTC) sonrasındaki para yatırma (+) / çekme (-) kayıtları."""
         lo = self._server_epoch(since) - 2 * 86400
-        hi = int(time.time()) + 2 * 86400
+        hi = int(self._wall()) + 2 * 86400
         deals = self.mt5.history_deals_get(lo, hi)
         if deals is None:
             code = self.mt5.last_error()
@@ -147,7 +149,11 @@ class MT5Broker:
 
     # ------------------------------------------------------------------ Broker arayüzü
     def now(self) -> datetime:
-        return datetime.now(timezone.utc).replace(tzinfo=None)
+        return self._clock()
+
+    def _wall(self) -> float:
+        """Şimdiki zamanın UTC epoch'u (saniye)."""
+        return (self._clock() - EPOCH).total_seconds()
 
     def account(self) -> Account:
         a = self.mt5.account_info()
