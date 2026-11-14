@@ -102,6 +102,10 @@ trading/
   - Bu ortamda paket indirmek gerekirse pip'i ortam proxy'sinden geçir (`NO_PROXY= no_proxy= pip ...`).
     Paket kodunu çalıştırma; yalnızca veri dosyalarını aç. `tick-backtest` paketindeki tick verisi sentetiktir.
   - MT5 terminali bu ortamda çalıştırılamaz (Wine yok, apt ve MetaQuotes sunucuları ağ politikasıyla kapalı).
+    Yerine `tests/mt5_sim.py` simülatörü var: `mt5_broker.py` değişirse
+    `LivePathAgainstSimulatedTerminal` testleri (canlı yol = doğrudan simülasyon) geçmeli.
+  - Maliyet duyarlılığı: geri çekilme avantajı EURUSD'de spread 2 pipte küçülüyor, 3 pipte kayboluyor.
+    Kullanıcıya düşük spread'li hesap gerektiğini söyle.
   - Para akışı (yatırma/çekme) mantığı `engine._apply_flows` içinde; değiştirirsen
     `test_random_flows_and_pnl_match_ground_truth_drawdown` testi geçmeli.
 - **Günlük trend portföyü (`research/fxlab` + `mql5/`):** FRED günlük verisinde 2000-2026

@@ -4,9 +4,12 @@ Python ile yazılmış, MetaTrader 5'e bağlanan gün içi bot. 7 major parite, 
 her M15 çubuğu kapanışında tarama yapar.
 
 **Durum (Kasım 2026):**
-- Altyapı 95 testle ve iki bağımsız kod incelemesiyle sınandı.
+- Altyapı 102 testle ve iki bağımsız kod incelemesiyle sınandı.
 - MT5 bağlantısı gerçek terminalde çalıştırılmadı: terminal yalnızca Windows'ta çalışır ve bu geliştirme
-  ortamında kurulamıyor. Kullanılan tüm sabitler, fonksiyonlar, alan ve istek adları resmi
+  ortamında kurulamıyor. Bunun yerine MT5'in Python arayüzünü taklit eden bir simülatör yazıldı
+  (`tests/mt5_sim.py`): canlı kod yolu (bağdaştırıcı + motor + komut satırı) bu simülatöre karşı baştan
+  sona çalışıyor ve doğrudan simülasyonla işlem işlem aynı sonucu veriyor (sunucu saati, yaz saati
+  geçişi, stop taşıma, gün sonu kapanışı dahil). Kullanılan tüm sabitler, fonksiyonlar, alan ve istek adları resmi
   `MetaTrader5` paketinin (5.0.6231) kaynağıyla karşılaştırıldı ve eşleşti.
 - **Strateji kanıtı karışık, henüz yeterli değil.** Gerçek EURUSD verisinde geri çekilme kurulumu
   2019-20 döneminde M15'te maliyet sonrası +0,14R (197 işlem), 2017'de saatlikte -0,10R (146 işlem) verdi.
@@ -128,6 +131,21 @@ Geri çekilme kurulumunun 2019-20 M15 sonucunun sağlamlığı:
 Walk-forward (2019-20 M15; stop parametreleri 120 günlük geçmişte seçilip sonraki görülmemiş 30 günde
 sınandı): 8 dilimin 7'si pozitif, toplam 103 örnek dışı işlemde ortalama +0,21R (std. hata 0,15).
 Yön tutarlı, ama işlem sayısı kesin hüküm için hâlâ az.
+
+Aynı kurallar, parametre değiştirilmeden, 2019-20 verisinde başka koşullarda:
+
+| Koşul | İşlem | Ortalama R (std. hata) | Getiri |
+|---|---|---|---|
+| M5 | 140 | +0,076 (0,112) | +%8,7 |
+| M15 (temel, spread 1,2 pip) | 197 | +0,140 (0,107) | +%18,8 |
+| M30 | 190 | +0,098 (0,098) | +%2,7 |
+| Saatlik | 150 | +0,161 (0,108) | +%27,9 |
+| M15, spread 2 pip | 58 | +0,057 (0,161) | +%2,1 |
+| M15, spread 3 pip | 23 | -0,002 (0,213) | %0,0 |
+
+Dört zaman diliminin hepsinde işaret pozitif. Sonuç maliyete duyarlı: spread 2 pip olunca "stop en az
+10 spread" kuralı işlemlerin çoğunu eler ve kalan avantaj küçülür; 3 pipte kaybolur. Bu sistem ancak
+düşük spread'li (EURUSD'de yaklaşık 1 pip ve altı) bir hesapta anlamlıdır.
 
 Okuma:
 
