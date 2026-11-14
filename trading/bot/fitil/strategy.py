@@ -115,13 +115,15 @@ def evaluate(df: pd.DataFrame, p: StrategyParams, spread: float) -> Signal | Non
                     return finish(-1, h[-1] + p.stop_buffer_atr * a, score, "sweep", f"{name} süpürüldü")
 
     # --- 2) Trend geri çekilmesi ---
+    # Kanaat puanı sabit 2 (standart risk). Geniş giriş çubuğuna ek risk verilmez: dört gerçek veri
+    # setinde (554 işlem) geniş çubuklu girişler daha iyi çıkmadı (-0,03R'ye karşı +0,04R).
     if "pullback" in p.setups and bias != 0:
         fast, slow = _ema(c, p.pullback_ema_fast), _ema(c, p.pullback_ema_slow)
         k, s = p.pullback_touch_bars, p.pullback_swing_bars
         if bias > 0 and fast[-1] > slow[-1] and c[-1] > o[-1] and c[-1] > h[-2] and c[-1] > fast[-1] \
                 and (l[-k:] <= fast[-k:]).any():
-            return finish(+1, l[-s:].min() - p.stop_buffer_atr * a, 2 + strong, "pullback", "EMA geri çekilmesi, yukarı")
+            return finish(+1, l[-s:].min() - p.stop_buffer_atr * a, 2, "pullback", "EMA geri çekilmesi, yukarı")
         if bias < 0 and fast[-1] < slow[-1] and c[-1] < o[-1] and c[-1] < l[-2] and c[-1] < fast[-1] \
                 and (h[-k:] >= fast[-k:]).any():
-            return finish(-1, h[-s:].max() + p.stop_buffer_atr * a, 2 + strong, "pullback", "EMA geri çekilmesi, aşağı")
+            return finish(-1, h[-s:].max() + p.stop_buffer_atr * a, 2, "pullback", "EMA geri çekilmesi, aşağı")
     return None

@@ -97,6 +97,7 @@ trading/
     EURUSD M15 2019-20: +0,14R (197 işlem); EURUSD saatlik 2017: -0,10R (146 işlem);
     vadeli altın M15 NY seansı 2020-22: -0,06R (168 işlem, maliyetsiz +0,03R); spot altın ve petrol
     örnekleri çok küçük. Süpürme hiçbir dönemde kazandırmadı ve varsayılan olarak kapalı.
+    Geniş giriş çubuğuna ek risk verilmiyor (dört veri setinde daha iyi çıkmadı); geri çekilme hep %0,5 riskle girer.
     Sonuç: güvenilir avantaj gösterilemedi; stratejiyi "çalışıyor" diye sunma. Yeni kural önerirken önce
     `fitil.backtest --wf` ile örnek dışı sonuç al. Ayrıntı `bot/README.md` içinde.
   - Gerçek örnek veri: `python bot/tools/fetch_sample_data.py` (EURUSD M1 2019-20 ve H1 2017; altın M5

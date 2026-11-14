@@ -33,7 +33,7 @@ her M15 çubuğu kapanışında tarama yapar.
 
 | Kural | Varsayılan |
 |---|---|
-| İşlem başına risk (kanaat puanı 1 / 2 / 3) | %0,25 / %0,5 / %1 |
+| İşlem başına risk | %0,5 (geri çekilme kurulumu). Kademeler %0,25 / %0,5 / %1 yalnızca süpürme kurulumu açıkken kullanılır |
 | Toplam açık risk | en fazla %3 |
 | Tek USD yönünde net risk | en fazla %2 |
 | Günlük kayıp sınırı | %3 (aşılınca o gün yeni giriş yok) |
@@ -112,15 +112,18 @@ Veri: açık kaynak paketlerin içinde dağıtılan gerçek EURUSD, altın ve ha
 
 | Dönem ve zaman dilimi | Kurulum | İşlem | Kazanma | Ortalama R (std. hata) | Getiri |
 |---|---|---|---|---|---|
-| Mart 2019 - Nisan 2020, **M15** | geri çekilme | 197 | %44,2 | **+0,140** (0,107) | +%18,8 |
+| Mart 2019 - Nisan 2020, **M15** | geri çekilme | 197 | %44,2 | **+0,140** (0,107) | +%13,4 |
 | aynı | süpürme | 16 | %31,2 | -0,346 (0,263) | -%3,3 |
-| Mart 2019 - Nisan 2020, saatlik | geri çekilme | 150 | %48,0 | +0,161 (0,108) | +%27,9 |
+| Mart 2019 - Nisan 2020, saatlik | geri çekilme | 150 | %48,0 | +0,161 (0,108) | +%11,1 |
 | aynı | süpürme | 59 | %40,7 | -0,017 (0,166) | +%6,7 |
-| Ocak 2017 - Şubat 2018, saatlik | geri çekilme | 146 | %32,2 | -0,096 (0,096) | -%11,1 |
+| Ocak 2017 - Şubat 2018, saatlik | geri çekilme | 146 | %32,2 | -0,096 (0,096) | -%9,4 |
 | aynı | süpürme | 70 | %25,7 | -0,277 (0,157) | -%9,2 |
 
-Hepsi varsayılan maliyetlerle (spread 1,2 pip, kayma, lot başına 7 USD komisyon) ve kurallar veri
-görülmeden önce yazıldığı haliyle; hiçbir parametre bu verilere göre ayarlanmadı.
+Hepsi varsayılan maliyetlerle (spread 1,2 pip, kayma, lot başına 7 USD komisyon). Giriş ve çıkış
+kuralları veri görülmeden önce yazıldığı haliyle; hiçbir parametre bu verilere göre ayarlanmadı.
+Tek değişiklik pozisyon büyüklüğünde: geniş giriş çubuğuna verilen iki kat risk kaldırıldı, çünkü dört
+veri setinde (554 işlem) bu girişler daha iyi çıkmadı (-0,03R'ye karşı +0,04R). İşlemler ve R değerleri
+aynı; getiri ve düşüş rakamları bu sabit %0,5 riskle hesaplandı.
 
 Geri çekilme kurulumunun 2019-20 M15 sonucunun sağlamlığı:
 
@@ -137,12 +140,12 @@ Aynı kurallar, parametre değiştirilmeden, 2019-20 verisinde başka koşullard
 
 | Koşul | İşlem | Ortalama R (std. hata) | Getiri |
 |---|---|---|---|
-| M5 | 140 | +0,076 (0,112) | +%8,7 |
-| M15 (temel, spread 1,2 pip) | 197 | +0,140 (0,107) | +%18,8 |
-| M30 | 190 | +0,098 (0,098) | +%2,7 |
-| Saatlik | 150 | +0,161 (0,108) | +%27,9 |
-| M15, spread 2 pip | 58 | +0,057 (0,161) | +%2,1 |
-| M15, spread 3 pip | 23 | -0,002 (0,213) | %0,0 |
+| M5 | 140 | +0,076 (0,112) | +%5,0 |
+| M15 (temel, spread 1,2 pip) | 197 | +0,140 (0,107) | +%13,4 |
+| M30 | 190 | +0,098 (0,098) | +%9,1 |
+| Saatlik | 150 | +0,161 (0,108) | +%11,1 |
+| M15, spread 2 pip | 58 | +0,057 (0,161) | +%0,8 |
+| M15, spread 3 pip | 23 | -0,002 (0,213) | -%0,1 |
 
 Dört zaman diliminin hepsinde işaret pozitif. Sonuç maliyete duyarlı: spread 2 pip olunca "stop en az
 10 spread" kuralı işlemlerin çoğunu eler ve kalan avantaj küçülür; 3 pipte kaybolur. Bu sistem ancak
@@ -152,9 +155,9 @@ Altın ve petrol (aynı kurallar, parametre değişmeden, varsayılan maliyetler
 
 | Veri | İşlem | Kazanma | Ortalama R (std. hata) | Getiri | Maliyetsiz ortalama R |
 |---|---|---|---|---|---|
-| Altın XAUUSD M15, tam seans, Ekim - Aralık 2021 | 43 | %32,6 | +0,121 (0,268) | +%0,9 | +0,418 |
-| Vadeli altın GC M15, yalnız New York seansı, 2020 - Şubat 2022 | 168 | %44,0 | -0,063 (0,059) | -%8,8 | +0,029 |
-| Ham petrol CL M15, yalnız New York seansı, Ekim - Aralık 2021 | 8 | %25,0 | -0,230 (0,274) | -%1,9 | -0,176 |
+| Altın XAUUSD M15, tam seans, Ekim - Aralık 2021 | 43 | %32,6 | +0,121 (0,268) | +%2,2 | +0,418 |
+| Vadeli altın GC M15, yalnız New York seansı, 2020 - Şubat 2022 | 168 | %44,0 | -0,063 (0,059) | -%4,9 | +0,029 |
+| Ham petrol CL M15, yalnız New York seansı, Ekim - Aralık 2021 | 8 | %25,0 | -0,230 (0,274) | -%1,0 | -0,176 |
 
 Vadeli altın en büyük bağımsız örnek ve sonucu net: maliyet öncesi sıfır, maliyet sonrası hafif eksi.
 Kısıtı, verinin yalnızca New York seansını içermesi (bot Londra ve New York'u birlikte kullanmak üzere
