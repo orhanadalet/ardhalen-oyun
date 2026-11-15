@@ -189,6 +189,20 @@ spread'i genişletir; hesap koşullarınızı kontrol edin.
   Öneriyi çekmezseniz kalan kâr ana paraya eklenmiş sayılır ve yeniden önerilmez; öneri dışı çektiğiniz
   ya da yatırdığınız para kâr hesabını bozmaz.
 
+## Fiyat geçmişini dışa aktarma ve gönderme
+
+1. MT5'te: Araçlar > Seçenekler > Grafikler > "Grafikteki en fazla çubuk" = **Sınırsız**. Terminali yeniden başlatın.
+2. MT5 açık ve hesaba giriş yapılmışken `bot\veri_aktar.bat` dosyasına çift tıklayın. (Ya da:
+   `python tools\export_mt5_history.py --config config.json --per-symbol --out ..\veri`)
+3. `trading\veri` klasöründe her sembol için bir `fitil_veri_..._SEMBOL.zip` oluşur. Ekranda her sembolün
+   kaç çubuk olduğu, hangi tarihten başladığı ve Londra/New York saatlerindeki ortanca spread'i yazar.
+4. Zip dosyalarını GitHub'da bu dalın `trading/veri` klasörüne yükleyin: depo sayfası > dal seçici >
+   `claude/forex-commodity-trading-setup-czzu6o` > `trading/veri` > "Add file" > "Upload files". Tarayıcıdan
+   dosya başına sınır 25 MB'tır; daha büyükse `--years 5` gibi bir sınırla yeniden dışa aktarın.
+
+Betik emir göndermez ve hesabı değiştirmez. Zamanlar UTC'ye çevrilir; piyasa kapalıyken çalıştıracaksanız
+config'e `server_time` yazın (aşağıda "Sunucu saati"). Zip içinde hesap bilgisi yoktur.
+
 ## Geçmiş veride sınama
 
 Canlıdaki aynı strateji ve motor kodu, simüle brokerla çalışır:

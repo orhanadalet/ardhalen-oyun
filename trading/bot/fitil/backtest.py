@@ -22,6 +22,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+import json
+
 from .broker import PaperBroker, Spec
 from .config import Config
 from .engine import Engine
@@ -93,14 +95,19 @@ def load_m15(path: str | Path, tz_shift_hours: float = 0.0, minutes: int = 15) -
     else:
         df = pd.read_csv(path, sep=";", header=None, names=["stamp", "open", "high", "low", "close", "vol"], encoding=enc)
         df.index = pd.to_datetime(df["stamp"], format="%Y%m%d %H%M%S")
+    spread_pts = df["spread_points"].astype(float) if "spread_points" in df.columns else None
     df = df[COLS].astype(float)
+    if spread_pts is not None:
+        df["spread_points"] = spread_pts
     df.index = df.index - pd.Timedelta(hours=tz_shift_hours)
     df.index.name = "time"
     df = df[~df.index.duplicated(keep="last")].sort_index()
     step = df.index.to_series().diff().dt.total_seconds().median()
     if step < minutes * 60:                             # daha sık veri: hedef zaman dilimine topla
-        df = df.resample(f"{minutes}min", label="left", closed="left").agg(
-            {"open": "first", "high": "max", "low": "min", "close": "last"}).dropna()
+        agg = {"open": "first", "high": "max", "low": "min", "close": "last"}
+        if "spread_points" in df.columns:
+            agg["spread_points"] = "median"
+        df = df.resample(f"{minutes}min", label="left", closed="left").agg(agg).dropna(subset=COLS)
     elif step > minutes * 60:
         raise ValueError(f"{path}: veri {minutes} dakikadan seyrek (ortanca aralık {step:.0f} sn)")
     if (df[COLS] <= 0).any().any() or (df["high"] < df["low"]).any():
@@ -285,12 +292,48 @@ def walk_forward(data: dict[str, pd.DataFrame], cfg: Config, grid: dict[str, lis
 WF_GRID = {"setups": [("sweep", "pullback"), ("sweep",), ("pullback",)], "max_stop_atr": [2.0, 3.0]}
 
 
+def load_data(source: str | Path, symbols: list[str], tz_shift: float = 0.0, minutes: int = 15):
+    """Klasörden (<SEMBOL>.csv) ya da export_mt5_history zip dosyasından veri ve sembol özelliklerini okur."""
+    import tempfile
+    import zipfile
+    source = Path(source)
+    specs: dict = {}
+    data: dict[str, pd.DataFrame] = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        if source.is_file() and source.suffix.lower() == ".zip":
+            zips, folders = [source], []
+        else:
+            zips, folders = sorted(source.glob("*.zip")), [source]  # klasör: içindeki csv'ler ve zip'ler
+        for i, zp in enumerate(zips):
+            target = Path(tmp) / str(i)
+            with zipfile.ZipFile(zp) as z:
+                for n in z.namelist():
+                    if (n.endswith(".csv") or n == "ozet.json") and "/" not in n and "\\" not in n and not n.startswith(".."):
+                        z.extract(n, target)            # yalnızca kök dizindeki dosyalar (güvenli açma)
+            folders.append(target)
+        for f in folders:
+            summary = f / "ozet.json"
+            if summary.exists():
+                specs.update(json.loads(summary.read_text(encoding="utf-8-sig")).get("semboller", {}))
+        for s in symbols:
+            p = next((f / f"{s}.csv" for f in folders if (f / f"{s}.csv").exists()), None)
+            if p is None:
+                print(f"{s}: veri yok, atlandı")
+                continue
+            try:
+                data[s] = load_m15(p, tz_shift, minutes)
+            except (ValueError, KeyError, UnicodeError) as e:
+                raise SystemExit(f"Veri dosyası okunamadı ({s}.csv): {e}")
+            print(f"{s}: {len(data[s])} çubuk, {data[s].index[0]} -> {data[s].index[-1]}")
+    return data, specs
+
+
 def main() -> None:
     from .__main__ import use_utf8_output
     use_utf8_output()
     ap = argparse.ArgumentParser(prog="fitil.backtest")
     ap.add_argument("--config", required=True)
-    ap.add_argument("--data", required=True)
+    ap.add_argument("--data", required=True, help="<SEMBOL>.csv dosyalarının klasörü ya da export_mt5_history zip dosyası")
     ap.add_argument("--start")
     ap.add_argument("--end")
     ap.add_argument("--equity", type=float, default=10_000.0)
@@ -310,26 +353,27 @@ def main() -> None:
         cfg = Config.load(a.config)
     except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as e:
         raise SystemExit(f"Yapılandırma hatası ({a.config}): {e}")
-    data = {}
-    for s in cfg.symbols:
-        p = Path(a.data) / f"{s}.csv"
-        if p.exists():
-            try:
-                data[s] = load_m15(p, a.tz_shift, cfg.strategy.bar_minutes)
-            except (ValueError, KeyError, UnicodeError) as e:
-                raise SystemExit(f"Veri dosyası okunamadı ({p}): {e}")
-            print(f"{s}: {len(data[s])} çubuk, {data[s].index[0]} -> {data[s].index[-1]}")
-        else:
-            print(f"{s}: {p} yok, atlandı")
+    data, specs = load_data(a.data, list(cfg.symbols), a.tz_shift, cfg.strategy.bar_minutes)
     if not data:
         raise SystemExit("Hiç veri dosyası bulunamadı")
     symbols = {}
     for s in data:
         entry = dict(cfg.symbols[s])
+        sp = specs.get(s, {})
+        if "hane" in sp:                                   # brokerın gerçek sembol özellikleri (dışa aktarımdan)
+            entry.setdefault("digits", sp["hane"])
+        if sp.get("kontrat"):
+            entry.setdefault("contract", sp["kontrat"])
         if a.no_swap:
             entry.update(swap_long=0.0, swap_short=0.0)
         if a.spread is not None:
             entry["spread"] = a.spread
+        elif "spread" not in entry and "spread_points" in data[s].columns:
+            point = sp.get("point") or 10.0 ** -sim_settings(s, entry)["digits"]
+            active = data[s]["spread_points"][(data[s].index.hour >= 7) & (data[s].index.hour < 17)]
+            if len(active) and np.isfinite(active.median()):
+                entry["spread"] = float(active.median()) * point
+                print(f"{s}: veriden ölçülen ortanca spread (07-17 UTC) = {entry['spread']:.5g}")
         symbols[s] = entry
     cfg = replace(cfg, symbols=symbols)
     print(f"Maliyet: komisyon {a.commission:g} USD/lot, swap {'yok' if a.no_swap else 'varsayılan'}, "

@@ -1727,6 +1727,90 @@ class AccountCosts(unittest.TestCase):
             self.assertTrue(np.isfinite(gross_f).all())
 
 
+class DataExport(unittest.TestCase):
+    """MT5 geçmiş dışa aktarımı -> zip -> backtest: kullanıcının izleyeceği yol baştan sona."""
+
+    def test_export_zip_roundtrip_with_utc_times_and_measured_spread(self):
+        import contextlib
+        import io
+        import zipfile
+        from unittest import mock
+        from mt5_sim import SimMT5
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bot" / "tools"))
+        import export_mt5_history as ex
+        rng = np.random.default_rng(9)
+        idx = pd.date_range("2024-01-01", periods=96 * 30, freq="15min")
+        idx = idx[(idx.weekday < 5) | ((idx.weekday == 6) & (idx.hour >= 22))]
+        c = 1.10 * np.exp(np.cumsum(rng.standard_t(4, len(idx)) * 0.0004))
+        o = np.concatenate([[1.10], c[:-1]])
+        w = np.abs(rng.normal(0, 0.0003, (2, len(idx))))
+        df = pd.DataFrame({"open": o, "high": np.maximum(o, c) + w[0], "low": np.minimum(o, c) - w[1], "close": c}, index=idx)
+        spread = 0.00013
+        paper_b = PaperBroker({"EURUSD": df}, {"EURUSD": SPEC}, {"EURUSD": 1e5}, {"EURUSD": "quote"}, {"EURUSD": spread},
+                              start=df.index[-1])
+        sim = SimMT5(paper_b)                                         # sunucu saati: New York + 7 (yaz saati dahil)
+        conf = cfg(server_time={"tz": "America/New_York", "plus_hours": 7})
+        broker = MT5Broker(conf, mt5=sim, sleep=lambda x: None, clock=paper_b.now)
+        old_chunk = ex.CHUNK
+        ex.CHUNK = 700                                                # birden çok parça okunsun
+        try:
+            with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(io.StringIO()):
+                (zpath,) = ex.export(conf, Path(d), 15, broker=broker)
+                with zipfile.ZipFile(zpath) as z:
+                    self.assertEqual(sorted(z.namelist()), ["EURUSD.csv", "ozet.json"])
+                    summary = json.loads(z.read("ozet.json"))
+                    text = z.read("EURUSD.csv").decode()
+                self.assertNotIn("login", text + json.dumps(summary))  # hesap bilgisi yazılmaz
+                info = summary["semboller"]["EURUSD"]
+                self.assertEqual(info["cubuk"], len(df) - 1)          # oluşmakta olan son çubuk hariç hepsi
+                self.assertAlmostEqual(info["ortanca_spread_fiyat_07_17_utc"], spread, places=8)
+                data, specs = bt.load_data(zpath, ["EURUSD", "GBPUSD"])
+                got = data["EURUSD"]
+                self.assertEqual(list(got.index), list(df.index[:-1]))   # zamanlar UTC'ye doğru çevrildi
+                np.testing.assert_allclose(got.close.to_numpy(), df.close.to_numpy()[:-1], rtol=0, atol=1e-9)   # 10 anlamlı hane
+                self.assertNotIn("GBPUSD", data)
+                self.assertEqual(specs["EURUSD"]["hane"], 5)
+                cfg_path = Path(d) / "c.json"
+                cfg_path.write_text(json.dumps({"symbols": {"EURUSD": {"usd_beta": -1}}}), encoding="utf-8")
+                out = io.StringIO()
+                with mock.patch.object(sys, "argv", ["fitil.backtest", "--config", str(cfg_path), "--data", str(zpath),
+                                                     "--commission", "0", "--no-swap"]), contextlib.redirect_stdout(out):
+                    bt.main()
+                self.assertIn("veriden ölçülen ortanca spread (07-17 UTC) = 0.00013", out.getvalue())
+                self.assertIn("Kazanma oranı", out.getvalue())
+        finally:
+            ex.CHUNK = old_chunk
+
+    def test_per_symbol_zips_and_year_limit_load_from_one_folder(self):
+        import contextlib
+        import io
+        from mt5_sim import SimMT5
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bot" / "tools"))
+        import export_mt5_history as ex
+        idx = pd.date_range("2022-01-03", periods=96 * 500, freq="15min")
+        idx = idx[idx.weekday < 5]
+        base = 1.10 + 0.0001 * np.sin(np.arange(len(idx)) / 9.0)
+        mk = lambda k: pd.DataFrame({"open": base * k, "high": base * k + 0.0002, "low": base * k - 0.0002, "close": base * k}, index=idx)
+        jpy = Spec("USDJPY", 3, 0.001, 0.01, 0.01, 100.0)
+        paper_b = PaperBroker({"EURUSD": mk(1.0), "USDJPY": mk(130.0)}, {"EURUSD": SPEC, "USDJPY": jpy},
+                              {"EURUSD": 1e5, "USDJPY": 1e5}, {"EURUSD": "quote", "USDJPY": "base"},
+                              {"EURUSD": 0.0001, "USDJPY": 0.012}, start=idx[-1])
+        sim = SimMT5(paper_b, zone="Etc/GMT-2", plus_hours=0)
+        conf = Config(symbols={"EURUSD": {"usd_beta": -1}, "USDJPY": {"usd_beta": 1}}, server_utc_offset_hours=2)
+        conf.validate()
+        broker = MT5Broker(conf, mt5=sim, sleep=lambda x: None, clock=paper_b.now)
+        with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(io.StringIO()):
+            paths = ex.export(conf, Path(d), 15, broker=broker, per_symbol=True, years=0.5)
+            self.assertEqual(sorted(p.name.split("_")[-1] for p in paths), ["EURUSD.zip", "USDJPY.zip"])
+            data, specs = bt.load_data(Path(d), ["EURUSD", "USDJPY"])
+            self.assertEqual(set(data), {"EURUSD", "USDJPY"})
+            self.assertEqual((specs["USDJPY"]["hane"], specs["EURUSD"]["hane"]), (3, 5))
+            span = data["EURUSD"].index[-1] - data["EURUSD"].index[0]
+            self.assertLessEqual(span, pd.Timedelta(days=183))
+            self.assertGreater(span, pd.Timedelta(days=170))
+            self.assertEqual(data["EURUSD"].index[-1], idx[-2])             # sabit UTC+2 sunucu saati geri çevrildi
+
+
 class Plan(unittest.TestCase):
     def test_expectation_drives_outcome_and_brake_limits_damage(self):
         from fitil.plan import required_equity, simulate

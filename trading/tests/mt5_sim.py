@@ -111,14 +111,18 @@ class SimMT5:
     def copy_rates_from_pos(self, symbol, timeframe, start_pos, count):
         if self.expected_timeframe is not None and timeframe != self.expected_timeframe:
             raise AssertionError(f"beklenmeyen zaman dilimi sabiti: {timeframe}")
-        if start_pos != 1:
+        if start_pos < 1:
             raise AssertionError("bot oluşan çubuğu (pozisyon 0) okumamalı")
-        df = self.paper.bars(symbol, count)        # yalnızca kapanmış çubuklar
+        skip = start_pos - 1                       # pozisyon 1 = son kapanmış çubuk; daha büyükse daha eskiye gidilir
+        df = self.paper.bars(symbol, count + skip)
+        df = df.iloc[:len(df) - skip] if skip else df
         arr = np.zeros(len(df), dtype=[("time", "i8"), ("open", "f8"), ("high", "f8"), ("low", "f8"), ("close", "f8"),
                                        ("tick_volume", "i8"), ("spread", "i4"), ("real_volume", "i8")])
         arr["time"] = [self.srv(t.to_pydatetime()) for t in df.index]
         for k in ("open", "high", "low", "close"):
             arr[k] = df[k].to_numpy()
+        arr["spread"] = int(round(self.paper.spread[symbol] / self.paper.specs[symbol].point))
+        arr["tick_volume"] = 100
         return arr
 
     # --- pozisyonlar ---
