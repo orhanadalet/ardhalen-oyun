@@ -212,16 +212,17 @@ def coin_signal(seed: int, rate: float, stop_atr: float = 1.5):
 
 
 def coin_baseline(data: dict[str, pd.DataFrame], cfg: Config, equity: float = 10_000.0, start=None, end=None,
-                  seeds: int = 6) -> dict:
+                  seeds: int = 6, commission_per_lot: float = 7.0) -> dict:
     """Stratejinin yön seçiminin değerini ölçer: aynı veri, aynı stop/çıkış/maliyet kuralları, ama yön yazı-tura.
 
     Dönüş: strateji ve yazı-tura için işlem sayısı, ortalama R ve standart hata; fark = yön seçiminin değeri.
     """
-    real, _, _ = run(data, cfg, equity, start, end)
+    real, _, _ = run(data, cfg, equity, start, end, commission_per_lot=commission_per_lot)
     bars = sum(int(((d.index.hour >= cfg.entry_hours[0]) & (d.index.hour < cfg.entry_hours[1])).sum())
                for d in data.values())
     rate = min(1.0, 3.0 * max(len(real), 1) / max(bars, 1))   # rastgele girişler sınırlarla elendiği için fazlası
-    coins = [run(data, cfg, equity, start, end, signal_fn=coin_signal(s, rate))[0] for s in range(seeds)]
+    coins = [run(data, cfg, equity, start, end, commission_per_lot=commission_per_lot,
+                 signal_fn=coin_signal(s, rate))[0] for s in range(seeds)]
     coin = pd.concat([c for c in coins if len(c)], ignore_index=True) if any(len(c) for c in coins) else pd.DataFrame(columns=["r"])
 
     def stat(t):
@@ -242,7 +243,8 @@ def _score(trades: pd.DataFrame, min_trades: int) -> float:
 
 
 def walk_forward(data: dict[str, pd.DataFrame], cfg: Config, grid: dict[str, list], train_days: int = 120,
-                 test_days: int = 30, min_trades: int = 30, equity: float = 10_000.0):
+                 test_days: int = 30, min_trades: int = 30, equity: float = 10_000.0,
+                 commission_per_lot: float = 7.0):
     """Strateji parametrelerini geçmiş pencerede seçer, HİÇ GÖRÜLMEMİŞ sonraki pencerede sınar.
 
     grid: StrategyParams alan adı -> denenecek değerler. Dönüş: (dilim tablosu, tüm örnek dışı işlemler).
@@ -262,11 +264,13 @@ def walk_forward(data: dict[str, pd.DataFrame], cfg: Config, grid: dict[str, lis
         te_end = tr_end + pd.Timedelta(days=test_days)
         scored = []
         for c in combos:
-            trades, _, _ = run(data, replace(cfg, strategy=replace(cfg.strategy, **c)), equity, t0, tr_end)
+            trades, _, _ = run(data, replace(cfg, strategy=replace(cfg.strategy, **c)), equity, t0, tr_end,
+                               commission_per_lot=commission_per_lot)
             scored.append((_score(trades, min_trades), c))
         best_score, best = max(scored, key=lambda x: x[0])
         chosen = best if np.isfinite(best_score) else {}
-        trades, _, _ = run(data, replace(cfg, strategy=replace(cfg.strategy, **chosen)), equity, tr_end, te_end)
+        trades, _, _ = run(data, replace(cfg, strategy=replace(cfg.strategy, **chosen)), equity, tr_end, te_end,
+                           commission_per_lot=commission_per_lot)
         folds.append(dict(egitim=f"{t0.date()}..{tr_end.date()}", test=f"{tr_end.date()}..{te_end.date()}",
                           secilen=chosen, egitim_ort_R=round(best_score, 3) if np.isfinite(best_score) else None,
                           test_islem=len(trades), test_ort_R=round(float(trades["r"].mean()), 3) if len(trades) else None))
@@ -292,6 +296,11 @@ def main() -> None:
     ap.add_argument("--equity", type=float, default=10_000.0)
     ap.add_argument("--tz-shift", type=float, default=0.0, help="verinin UTC'den farkı (saat); MT5 sunucu saati için ör. 2")
     ap.add_argument("--trades-out", help="işlem listesini CSV olarak yaz")
+    ap.add_argument("--commission", type=float, default=7.0,
+                    help="lot başına gidiş-dönüş komisyon (USD). Komisyonsuz (yalnız spread) hesap için 0")
+    ap.add_argument("--no-swap", action="store_true", help="swapsız hesap: gece taşıma maliyeti yok")
+    ap.add_argument("--spread", type=float,
+                    help="tüm semboller için ortalama spread (fiyat biriminde, ör. EURUSD 1,2 pip = 0.00012)")
     ap.add_argument("--coin", action="store_true", help="yön seçiminin değerini yazı-turaya karşı ölç")
     ap.add_argument("--wf", action="store_true", help="walk-forward: parametreyi geçmişte seç, görülmemiş dönemde sına")
     ap.add_argument("--train-days", type=int, default=120)
@@ -314,9 +323,19 @@ def main() -> None:
             print(f"{s}: {p} yok, atlandı")
     if not data:
         raise SystemExit("Hiç veri dosyası bulunamadı")
-    cfg = replace(cfg, symbols={s: cfg.symbols[s] for s in data})
+    symbols = {}
+    for s in data:
+        entry = dict(cfg.symbols[s])
+        if a.no_swap:
+            entry.update(swap_long=0.0, swap_short=0.0)
+        if a.spread is not None:
+            entry["spread"] = a.spread
+        symbols[s] = entry
+    cfg = replace(cfg, symbols=symbols)
+    print(f"Maliyet: komisyon {a.commission:g} USD/lot, swap {'yok' if a.no_swap else 'varsayılan'}, "
+          f"spread {'sembol ayarı/varsayılan' if a.spread is None else a.spread}")
     if a.coin:
-        res = coin_baseline(data, cfg, a.equity, a.start, a.end)
+        res = coin_baseline(data, cfg, a.equity, a.start, a.end, commission_per_lot=a.commission)
         s, c = res["strateji"], res["yazi_tura"]
         print(f"\nStrateji : {s['islem']:5d} işlem, ortalama {s['ort_R']:+.3f}R (std. hata {s['std_hata']:.3f})")
         print(f"Yazı-tura: {c['islem']:5d} işlem, ortalama {c['ort_R']:+.3f}R (std. hata {c['std_hata']:.3f})")
@@ -324,7 +343,8 @@ def main() -> None:
               "Aynı stop, çıkış ve maliyet; tek fark yönün nasıl seçildiği.")
         return
     if a.wf:
-        folds, oos = walk_forward(data, cfg, WF_GRID, a.train_days, a.test_days, equity=a.equity)
+        folds, oos = walk_forward(data, cfg, WF_GRID, a.train_days, a.test_days, equity=a.equity,
+                                  commission_per_lot=a.commission)
         pd.set_option("display.width", 200)
         print()
         print(folds.to_string(index=False))
@@ -335,7 +355,7 @@ def main() -> None:
             print("Ortalama R, standart hatanın iki katından büyük değilse sonuç şanstan ayırt edilemez.")
         return
     try:
-        trades, equity, _ = run(data, cfg, a.equity, a.start, a.end)
+        trades, equity, _ = run(data, cfg, a.equity, a.start, a.end, commission_per_lot=a.commission)
     except ValueError as e:
         raise SystemExit(f"Backtest çalıştırılamadı: {e}")
     print()

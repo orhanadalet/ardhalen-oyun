@@ -141,6 +141,38 @@ Taşınan işlemler kârda bitti, ama gün sonunda kapatılsalar daha fazla kaza
 taşınan her işlem, kapatmaya göre ortalama yaklaşık 0,4R geri verdi. Örneklem küçük (23 işlem), fark kesin
 değil; ama lehte kanıt yok. Bu yüzden varsayılan gün sonu kapanışı, seçenek sınama için duruyor.
 
+## Hesap türüne göre maliyet
+
+Komisyonsuz ve swapsız (yalnız spread) hesapta maliyetin tamamı spread'dedir. EURUSD M15 2019-20, komisyon 0,
+swap 0, kayma 0,3 pip:
+
+| Ortalama spread | İşlem | Ortalama R (std. hata) | Getiri | Azami düşüş |
+|---|---|---|---|---|
+| 0,8 pip | 311 | +0,041 (0,085) | -%5,5 | -%12,6 |
+| 1,0 pip | 256 | +0,087 (0,094) | +%10,1 | -%6,1 |
+| 1,2 pip | 197 | +0,183 (0,107) | +%18,4 | -%3,9 |
+| 1,5 pip | 119 | +0,095 (0,112) | +%4,9 | -%4,5 |
+| 2,0 pip | 58 | +0,097 (0,162) | +%2,0 | -%2,1 |
+| 2,5 pip | 35 | +0,041 (0,195) | +%0,6 | -%2,3 |
+
+Okuma: "stop en az 10 spread" kuralı yüzünden spread işlem kümesini de değiştirir. Spread düşükken daha dar
+stoplu işlemler de alınır, yükseldikçe işlem sayısı hızla düşer: 2 pipte yılda yaklaşık 60 işlem kalır.
+Satırlar arasındaki ortalama R farkları istatistiksel olarak ayırt edilemez; dar stoplu işlemlerin kötü olduğu
+da dört veri setinde tutarlı çıkmadı. Kesin olan, spread arttıkça fırsatın azalması.
+
+Swap olmadığında da kazananı gece taşımak gün sonu kapanışından kötü çıktı (1,0 pip: +0,087R'ye karşı
++0,071R; 1,5 pip: +0,095R'ye karşı +0,081R). Yani gece taşımanın sorunu swap değil, kazancın geri verilmesi.
+
+Kendi hesabınızın koşullarıyla backtest:
+
+```
+python -m fitil.backtest --config config.json --data ..\data --commission 0 --no-swap --spread 0.00012
+```
+
+`--spread` tüm semboller için ortak değerdir; sembol başına farklı spread için config'te sembolün altına
+`"spread": 0.00012` yazın. Swapsız hesaplarda bazı brokerlar belirli günden sonra yönetim ücreti alır ya da
+spread'i genişletir; hesap koşullarınızı kontrol edin.
+
 ## Güvenlik davranışları
 
 - **Bağlantı koparsa** bot her turda yeniden bağlanmayı dener; stoplar bu sırada brokerda durur.

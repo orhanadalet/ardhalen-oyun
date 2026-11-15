@@ -109,6 +109,8 @@ trading/
     ikiye katlama aynı işlemlerle sonucu yıktı. Yeni araç/gösterge önerirken önce `--coin` ve `--wf` ile ölç.
   - Kasa: risk merdiveni (`risk_ladder`) canlı kanıta bağlı, en çok %2. Müdahaleler `MÜDAHALE` olarak
     günlüğe yazılır; `python -m fitil.report` haftalık özeti verir.
+  - Kullanıcının hesabı komisyonsuz ve swapsız (yalnız spread). Backtest'te `--commission 0 --no-swap`
+    ve hesabın gerçek ortalama spread'ini kullan. Gerçek spread değerleri henüz bilinmiyor; kullanıcıdan iste.
   - Bu ortamda paket indirmek gerekirse pip'i ortam proxy'sinden geçir (`NO_PROXY= no_proxy= pip ...`).
     Paket kodunu çalıştırma; yalnızca veri dosyalarını aç. `tick-backtest` paketindeki tick verisi sentetiktir.
   - MT5 terminali bu ortamda çalıştırılamaz (Wine yok, apt ve MetaQuotes sunucuları ağ politikasıyla kapalı).

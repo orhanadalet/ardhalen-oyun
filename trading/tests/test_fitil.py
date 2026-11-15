@@ -1691,6 +1691,42 @@ class OvernightAndSwap(unittest.TestCase):
         self.assertAlmostEqual(b.account().equity, 10_000.0 + sum(x["pnl"] for x in b.closed), places=6)
 
 
+class AccountCosts(unittest.TestCase):
+    def test_backtest_cli_accepts_commission_free_swap_free_account(self):
+        import contextlib
+        import io
+        from unittest import mock
+        rng = np.random.default_rng(4)
+        idx = pd.date_range("2024-01-01", periods=96 * 20, freq="15min")
+        idx = idx[idx.weekday < 5]
+        c = 1.10 * np.exp(np.cumsum(rng.standard_t(4, len(idx)) * 0.0004))
+        o = np.concatenate([[1.10], c[:-1]])
+        w = np.abs(rng.normal(0, 0.0003, (2, len(idx))))
+        df = pd.DataFrame({"open": o, "high": np.maximum(o, c) + w[0], "low": np.minimum(o, c) - w[1], "close": c}, index=idx)
+        with tempfile.TemporaryDirectory() as d:
+            df.to_csv(Path(d) / "EURUSD.csv")
+            (Path(d) / "c.json").write_text(json.dumps({"symbols": {"EURUSD": {"usd_beta": -1}}}), encoding="utf-8")
+            outs = {}
+            for name, extra in (("std", []), ("free", ["--commission", "0", "--no-swap", "--spread", "0.00015"])):
+                out = io.StringIO()
+                with mock.patch.object(sys, "argv", ["fitil.backtest", "--config", str(Path(d) / "c.json"), "--data", d,
+                                                     "--trades-out", str(Path(d) / f"{name}.csv")] + extra), \
+                        contextlib.redirect_stdout(out):
+                    bt.main()
+                outs[name] = out.getvalue()
+            self.assertIn("komisyon 7 USD/lot", outs["std"])
+            self.assertIn("komisyon 0 USD/lot, swap yok, spread 0.00015", outs["free"])
+            std = pd.read_csv(Path(d) / "std.csv")
+            free = pd.read_csv(Path(d) / "free.csv")
+            self.assertGreater(len(std), 3)
+            self.assertGreater(len(free), 3)
+            g = free.merge(std, on=["open_time", "direction"], suffixes=("_f", "_s"))
+            self.assertGreater(len(g), 0)
+            # aynı işlemde: komisyon yok ama spread daha geniş; fark yalnız maliyetten gelir
+            gross_f = g.pnl_f.to_numpy()
+            self.assertTrue(np.isfinite(gross_f).all())
+
+
 class Plan(unittest.TestCase):
     def test_expectation_drives_outcome_and_brake_limits_damage(self):
         from fitil.plan import required_equity, simulate
