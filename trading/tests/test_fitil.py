@@ -1635,6 +1635,62 @@ class CombinedSystem(unittest.TestCase):
         self.assertFalse(eng.cfg.risk_ladder)                           # backtest sabit riskle ölçer
 
 
+class OvernightAndSwap(unittest.TestCase):
+    def setUp(self):
+        self.df, _ = with_sweep_low(m15())                          # son çubuk Çarşamba 2024-03-13 09:00
+
+    def run_to(self, closes, conf, start_shift=None):
+        df = self.df
+        idx = pd.date_range(df.index[-1] + pd.Timedelta(minutes=15), periods=len(closes), freq="15min")
+        c = np.array(closes, dtype=float)
+        o = np.concatenate([[df.close.iloc[-1]], c[:-1]])
+        tail = pd.DataFrame({"open": o, "high": np.maximum(o, c) + 0.00002, "low": np.minimum(o, c) - 0.00002,
+                             "close": c}, index=idx)
+        b = paper(pd.concat([df, tail]), start=idx[0], swap={"EURUSD": (-6.0, -3.0)})
+        logs = []
+        e = Engine(b, conf, log=logs.append)
+        e.step()
+        while b.advance():
+            e.step()
+        return b, e, logs
+
+    def rally_then_flat(self, bars):
+        c0 = self.df.close.iloc[-1]
+        up = [c0 + 0.0003 * k for k in range(1, 13)]                 # 1,5R'yi geçer, stop kâra kilitlenir
+        return up + [up[-1] + 0.00001 * (k % 3) for k in range(bars - len(up))]
+
+    def test_profit_locked_position_is_held_overnight_and_charged_swap(self):
+        b, e, logs = self.run_to(self.rally_then_flat(4 * 30), cfg(hold_winners=True))   # Çarşamba -> Perşembe 15:00
+        self.assertEqual(len(b.positions()), 1)                      # gece taşındı, sabah kapatılmadı
+        p = b.positions()[0]
+        self.assertGreater((p.sl - p.entry) * p.direction, 0)
+        self.assertAlmostEqual(b._swap_acc[p.ticket], -6.0 * p.lots * 3)   # Çarşamba gecesi: 3 kat
+        self.assertFalse([x for x in logs if "gece taşınmış" in x])
+
+    def test_without_option_everything_closes_at_day_end_and_pays_no_swap(self):
+        b, e, logs = self.run_to(self.rally_then_flat(4 * 30), cfg())
+        self.assertEqual(b.positions(), [])
+        self.assertEqual(pd.Timestamp(b.closed[0]["close_time"]).hour, 20)
+        self.assertEqual(b._swap_acc, {})
+
+    def test_position_still_at_risk_is_closed_even_with_option(self):
+        c0 = self.df.close.iloc[-1]
+        b, e, logs = self.run_to([c0 + 0.00001 * (k % 3) for k in range(4 * 30)], cfg(hold_winners=True))
+        self.assertEqual(b.positions(), [])                          # stop kâra kilitlenmedi: gün sonu kapandı
+        self.assertEqual(pd.Timestamp(b.closed[0]["close_time"]).hour, 20)
+
+    def test_held_position_closes_on_friday_and_swap_is_in_pnl(self):
+        b, e, logs = self.run_to(self.rally_then_flat(4 * 24 * 2 + 4 * 12), cfg(hold_winners=True))   # Cuma 21:00'e kadar
+        self.assertEqual(b.positions(), [])
+        t = b.closed[0]
+        self.assertEqual(pd.Timestamp(t["close_time"]).weekday(), 4)                   # cuma kapandı
+        self.assertEqual(pd.Timestamp(t["close_time"]).hour, 20)
+        lots = t["lots"]
+        gross = (t["exit"] - t["entry"]) * lots * 100_000
+        self.assertAlmostEqual(t["pnl"], gross - 0.0 * lots + (-6.0 * lots * 3) + (-6.0 * lots), places=6)   # Çar 3x + Per 1x
+        self.assertAlmostEqual(b.account().equity, 10_000.0 + sum(x["pnl"] for x in b.closed), places=6)
+
+
 class Plan(unittest.TestCase):
     def test_expectation_drives_outcome_and_brake_limits_damage(self):
         from fitil.plan import required_equity, simulate

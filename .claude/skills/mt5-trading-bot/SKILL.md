@@ -94,7 +94,7 @@ trading/
   - `mt5_broker.py` gerçek terminalde çalıştırılmadı; kullanıcı ilk çalıştırmada hata bildirirse
     önce orayı şüpheli say.
   - Kanıt durumu (gerçek veri, kurallar veriye göre ayarlanmadan), geri çekilme kurulumu:
-    EURUSD M15 2019-20: +0,14R (197 işlem); EURUSD saatlik 2017: -0,10R (146 işlem);
+    EURUSD M15 2019-20: +0,14R (197 işlem); EURUSD saatlik 2017: -0,08R (147 işlem);
     vadeli altın M15 NY seansı 2020-22: -0,06R (168 işlem, maliyetsiz +0,03R); spot altın ve petrol
     örnekleri çok küçük. Süpürme hiçbir dönemde kazandırmadı ve varsayılan olarak kapalı.
     Reddedilen hipotez: "kırılım devamı" (2017'de görüldü, 2019-20 EURUSD'de tekrarlanmadı); yeniden önerme.

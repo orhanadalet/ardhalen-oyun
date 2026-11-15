@@ -12,7 +12,7 @@ her M15 çubuğu kapanışında tarama yapar.
   geçişi, stop taşıma, gün sonu kapanışı dahil). Kullanılan tüm sabitler, fonksiyonlar, alan ve istek adları resmi
   `MetaTrader5` paketinin (5.0.6231) kaynağıyla karşılaştırıldı ve eşleşti.
 - **Strateji kanıtı karışık ve yetersiz.** Geri çekilme kurulumu gerçek EURUSD verisinde 2019-20'de
-  M15'te maliyet sonrası +0,14R (197 işlem), 2017'de saatlikte -0,10R (146 işlem); vadeli altında
+  M15'te maliyet sonrası +0,14R (197 işlem), 2017'de saatlikte -0,08R (147 işlem); vadeli altında
   2020-22'de -0,06R (168 işlem) verdi. Süpürme (fitil) kurulumu hiçbir dönemde kazandırmadı ve
   varsayılan olarak kapatıldı.
   Ayrıntı aşağıda "Gerçek veri sonucu" bölümünde. Demo hesapta izlemeden gerçek para kullanmayın.
@@ -123,6 +123,24 @@ Yapılmayanlar ve nedenleri: daha fazla gösterge filtresi (deney 1: aşırı uy
 (deney 3: sonucu değiştirmedi), kayıptan sonra risk artırma (deney 3: yıkım riski). Martingale ve stopsuz
 işlem zaten imkânsız.
 
+## Gün sonu kapanışı: sınandı
+
+Gün sonunda her şeyi kapatmak koşan kazançları da keser. Alternatif sınandı (`"hold_winners": true`):
+stopu kâra kilitlenmiş pozisyonlar gece taşınır ve ertesi gün yönetilmeye devam eder, risk taşıyanlar
+kapanır, cuma gün sonunda her şey kapanır.
+Gece swap maliyeti simülasyona eklendi (varsayımsal: EURUSD lot başına gece long -6, short -3 USD;
+çarşamba 3 kat).
+
+| Veri | Gün sonu kapat | Kazananı gece taşı | Gece taşınan işlem |
+|---|---|---|---|
+| EURUSD M15 2019-20 | +0,140R, +%13,4 | +0,122R, +%11,4 | 10 (ortalama +1,98R) |
+| EURUSD saatlik 2017 | -0,078R, -%9,1 | -0,107R, -%9,7 | 12 (ortalama +1,65R) |
+| Altın M15 2021 | +0,121R, +%2,2 | +0,085R, +%1,5 | 1 (+7,07R) |
+
+Taşınan işlemler kârda bitti, ama gün sonunda kapatılsalar daha fazla kazandıracaklardı: EURUSD 2019-20'de
+taşınan her işlem, kapatmaya göre ortalama yaklaşık 0,4R geri verdi. Örneklem küçük (23 işlem), fark kesin
+değil; ama lehte kanıt yok. Bu yüzden varsayılan gün sonu kapanışı, seçenek sınama için duruyor.
+
 ## Güvenlik davranışları
 
 - **Bağlantı koparsa** bot her turda yeniden bağlanmayı dener; stoplar bu sırada brokerda durur.
@@ -176,7 +194,7 @@ Veri: açık kaynak paketlerin içinde dağıtılan gerçek EURUSD, altın ve ha
 | aynı | süpürme | 16 | %31,2 | -0,346 (0,263) | -%3,3 |
 | Mart 2019 - Nisan 2020, saatlik | geri çekilme | 150 | %48,0 | +0,161 (0,108) | +%11,1 |
 | aynı | süpürme | 59 | %40,7 | -0,017 (0,166) | +%6,7 |
-| Ocak 2017 - Şubat 2018, saatlik | geri çekilme | 146 | %32,2 | -0,096 (0,096) | -%9,4 |
+| Ocak 2017 - Şubat 2018, saatlik | geri çekilme | 147 | %32,7 | -0,078 (0,097) | -%9,1 |
 | aynı | süpürme | 70 | %25,7 | -0,277 (0,157) | -%9,2 |
 
 Hepsi varsayılan maliyetlerle (spread 1,2 pip, kayma, lot başına 7 USD komisyon). Giriş ve çıkış

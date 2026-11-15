@@ -31,11 +31,11 @@ COLS = ["open", "high", "low", "close"]
 # Simülasyon varsayılanları (brokerınızın değerleri DEĞİL; config'te sembol başına ezilebilir):
 #   contract, usd_side, digits, spread (fiyat biriminde), slippage
 DEFAULTS = {
-    "fx":     dict(contract=100_000.0, usd_side="quote", digits=5, spread=0.00012, slippage=0.00003),
-    "fx_usd": dict(contract=100_000.0, usd_side="base", digits=5, spread=0.00014, slippage=0.00003),
-    "jpy":    dict(contract=100_000.0, usd_side="base", digits=3, spread=0.013, slippage=0.003),
-    "gold":   dict(contract=100.0, usd_side="quote", digits=2, spread=0.30, slippage=0.05),
-    "oil":    dict(contract=1000.0, usd_side="quote", digits=2, spread=0.04, slippage=0.01),
+    "fx":     dict(contract=100_000.0, usd_side="quote", digits=5, spread=0.00012, slippage=0.00003, swap_long=-6.0, swap_short=-3.0),
+    "fx_usd": dict(contract=100_000.0, usd_side="base", digits=5, spread=0.00014, slippage=0.00003, swap_long=-3.0, swap_short=-6.0),
+    "jpy":    dict(contract=100_000.0, usd_side="base", digits=3, spread=0.013, slippage=0.003, swap_long=-3.0, swap_short=-8.0),
+    "gold":   dict(contract=100.0, usd_side="quote", digits=2, spread=0.30, slippage=0.05, swap_long=-30.0, swap_short=-10.0),
+    "oil":    dict(contract=1000.0, usd_side="quote", digits=2, spread=0.04, slippage=0.01, swap_long=-10.0, swap_short=-6.0),
 }
 
 
@@ -52,7 +52,8 @@ def kind_of(symbol: str) -> str:
 
 def sim_settings(symbol: str, entry: dict) -> dict:
     out = dict(DEFAULTS[kind_of(symbol)])
-    out.update({k: entry[k] for k in ("contract", "usd_side", "digits", "spread", "slippage") if k in entry})
+    out.update({k: entry[k] for k in ("contract", "usd_side", "digits", "spread", "slippage", "swap_long", "swap_short")
+                if k in entry})
     return out
 
 
@@ -129,7 +130,8 @@ def run(data: dict[str, pd.DataFrame], cfg: Config, equity: float = 10_000.0, st
                          {s: v["usd_side"] for s, v in sim.items()}, {s: v["spread"] for s, v in sim.items()},
                          equity=equity, commission_per_lot=commission_per_lot,
                          slippage={s: v["slippage"] for s, v in sim.items()}, start=start,
-                         bar=pd.Timedelta(minutes=cfg.strategy.bar_minutes).to_pytimedelta())
+                         bar=pd.Timedelta(minutes=cfg.strategy.bar_minutes).to_pytimedelta(),
+                         swap={s: (v["swap_long"], v["swap_short"]) for s, v in sim.items()})
     engine = Engine(broker, cfg, log=log, signal_fn=signal_fn)
     days, values = [], []
     while True:

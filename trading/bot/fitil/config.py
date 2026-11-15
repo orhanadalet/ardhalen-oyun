@@ -50,7 +50,10 @@ class Config:
 
     # Zaman (UTC)
     entry_hours: tuple = (7, 17)      # [başlangıç, bitiş) saatleri arasında yeni giriş
-    flat_hour: int = 20               # bu saatte tüm pozisyonlar kapatılır (rollover öncesi)
+    flat_hour: int = 20               # bu saatte pozisyonlar kapatılır (rollover öncesi)
+    # Kazananı gece taşı: gün sonunda yalnızca stopu kâra kilitlenmiş (kaybedemeyecek) pozisyonlar açık kalır,
+    # risk taşıyanlar kapatılır. Cuma günü her şey kapanır (hafta sonu boşluğu).
+    hold_winners: bool = False
     blackouts: list = field(default_factory=list)   # ["2026-11-18T19:00", ...] UTC, yüksek etkili veri
     blackout_minutes: int = 15        # veri saatinin bu kadar öncesi/sonrası giriş yok
     recurring_blackouts: list = field(default_factory=lambda: [

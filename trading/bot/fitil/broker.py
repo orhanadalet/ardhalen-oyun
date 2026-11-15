@@ -110,8 +110,14 @@ class PaperBroker:
     def __init__(self, data: dict[str, pd.DataFrame], specs: dict[str, Spec], contract: dict[str, float],
                  usd_side: dict[str, str], spread: dict[str, float], equity: float = 10_000.0,
                  commission_per_lot: float = 7.0, slippage: dict[str, float] | None = None,
-                 start: datetime | None = None, bar: timedelta = BAR):
+                 start: datetime | None = None, bar: timedelta = BAR,
+                 swap: dict[str, tuple[float, float]] | None = None):
         self.bar = bar
+        # Gece taşıma maliyeti: sembol -> (long, short) hesap para birimi / lot / gece. Çarşamba 3 kat.
+        # 21:00 UTC'yi (rollover) geçen her pozisyona işlenir.
+        self.swap = swap or {}
+        self._swap_acc: dict[int, float] = {}
+        self._swap_day = None
         self.data, self.specs, self.contract, self.usd_side, self.spread = data, specs, contract, usd_side, spread
         self.commission, self.slippage = commission_per_lot, slippage or {}
         self.balance = equity
@@ -155,6 +161,14 @@ class PaperBroker:
                 elif p.direction < 0 and b["high"] + self.spread[s] >= p.sl:
                     self._settle(p, max(p.sl, b["open"] + self.spread[s]) + slip, t + self.bar, "stop")
             self._last[s] = float(b["close"])
+        if self.swap and t.hour >= 21 and self._swap_day != t.date():
+            self._swap_day = t.date()
+            nights = 3 if t.weekday() == 2 else 1
+            for p in self._pos.values():
+                long_, short = self.swap.get(p.symbol, (0.0, 0.0))
+                amount = (long_ if p.direction > 0 else short) * p.lots * nights
+                self.balance += amount
+                self._swap_acc[p.ticket] = self._swap_acc.get(p.ticket, 0.0) + amount
         if self._i + 1 >= len(self.timeline):
             return False
         self._i += 1
@@ -254,7 +268,7 @@ class PaperBroker:
         pnl = self._pnl(p, price)
         self.balance += pnl
         risk, comment = self._meta.pop(p.ticket, (0.0, ""))
-        net = pnl - self.commission * p.lots
+        net = pnl - self.commission * p.lots + self._swap_acc.pop(p.ticket, 0.0)
         self.closed.append(dict(ticket=p.ticket, symbol=p.symbol, direction=p.direction, lots=p.lots,
                                 entry=p.entry, exit=price, open_time=p.open_time, close_time=when,
                                 pnl=net, risk=risk, r=net / risk if risk > 0 else float("nan"),

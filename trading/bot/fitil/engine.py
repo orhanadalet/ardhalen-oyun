@@ -266,6 +266,17 @@ class Engine:
                 self.state["ladder"] = level
             self._save()
 
+    def _may_hold(self, p: Pos, now: datetime, at_day_end: bool = False) -> bool:
+        """hold_winners açıkken stopu girişin kâr tarafında olan pozisyon açık kalabilir.
+
+        Gün sonunda: pazartesi-perşembe gece taşınır, cuma kapanır (hafta sonu boşluğu).
+        Gün içinde: taşınmış pozisyon o günün gün sonuna kadar yönetilmeye devam eder (cuma dahil);
+        sığ gece saatlerinde kapatılmaz.
+        """
+        if not self.cfg.hold_winners or now.weekday() >= 5 or (at_day_end and now.weekday() >= 4):
+            return False
+        return p.sl > 0 and (p.sl - p.entry) * p.direction > 0
+
     def _check_manual_sl(self, now: datetime, positions: list[Pos]) -> None:
         """Bot dışında değiştirilen stopu tespit eder (bot ancak kendi koyduğu stopu bilir)."""
         for p in positions:
@@ -339,13 +350,15 @@ class Engine:
 
         if now.hour >= c.flat_hour or now.weekday() >= 5:
             for p in positions:
+                if self._may_hold(p, now, at_day_end=True):
+                    continue
                 self._close(now, p, "gün sonu")
             if settled and now.hour >= c.flat_hour and now.weekday() < 5 and (self.dry_run or not b.positions()):
                 self._withdraw_hint(now, b.account().equity)
             return
 
         # Gece taşınmış pozisyon (bot kapalıydı ya da kapanış reddedildi): ilk fırsatta kapat
-        carried = [p for p in positions if p.open_time.date() < now.date()]
+        carried = [p for p in positions if p.open_time.date() < now.date() and not self._may_hold(p, now)]
         for p in carried:
             self._close(now, p, "gece taşınmış")
         if carried and not self.dry_run:
