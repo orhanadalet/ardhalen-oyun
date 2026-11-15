@@ -48,7 +48,9 @@ Küçük hesaplar için cent hesap gerekir.
 ## Kurulum (Windows)
 
 1. MT5 terminalini açın, **demo** hesaba giriş yapın, "Algo Trading" düğmesini etkinleştirin.
-2. Python 3.10+ kurun, sonra bu klasörde: `pip install -r requirements.txt`
+2. Python 3.10+ kurun (python.org, "Add python.exe to PATH" işaretli), sonra bu klasörde:
+   `py -m pip install -r requirements.txt`. Komut İstemi "Python was not found" derse `python` yerine `py`
+   kullanın; `.bat` dosyaları ikisini de kendiliğinden dener.
 3. `config.example.json` dosyasını `config.json` olarak kopyalayın. `symbols` altındaki adları
    Market Watch'taki tam adlarla değiştirin (ör. `XAUUSD.m`, `USOIL`).
 4. Yüksek etkili veri saatlerini (NFP, FOMC, CPI, EIA) `blackouts` listesine UTC olarak yazın:
