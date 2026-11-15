@@ -192,6 +192,25 @@ spread'i genişletir; hesap koşullarınızı kontrol edin.
   Öneriyi çekmezseniz kalan kâr ana paraya eklenmiş sayılır ve yeniden önerilmez; öneri dışı çektiğiniz
   ya da yatırdığınız para kâr hesabını bozmaz.
 
+## Kolay güncelleme (bir kez kurulum)
+
+Her değişiklikte zip indirip dosya kopyalamak yerine Git ile tek tıkla güncelleme:
+
+1. Komut İstemi'nde Git'i kurun: `winget install -e --id Git.Git`. Sonra Komut İstemi'ni kapatıp yeniden açın.
+2. Depoyu bir kez indirin (GitHub girişi için tarayıcı açılabilir):
+   ```
+   cd /d D:\
+   git clone -b claude/forex-commodity-trading-setup-czzu6o https://github.com/orhanadalet/ardhalen-oyun.git FitilRepo
+   ```
+3. Eski klasördeki `D:\Fitil\trading\bot\config.json` dosyasını `D:\FitilRepo\trading\bot\` içine kopyalayın.
+   Bundan sonra yalnızca `D:\FitilRepo` klasörünü kullanın.
+
+Sonrası:
+- **Güncellemek için:** `trading\bot\guncelle.bat` dosyasına çift tıklayın. `config.json`, günlük ve durum
+  dosyaları güncellemede ezilmez.
+- **Yeni veri göndermek için:** `veri_aktar.bat`, ardından `gonder.bat`. Yalnızca `trading\veri` içindeki zip
+  dosyaları gönderilir.
+
 ## Fiyat geçmişini dışa aktarma ve gönderme
 
 1. MT5'te: Araçlar > Seçenekler > Grafikler > "Grafikteki en fazla çubuk" = **Sınırsız**. Terminali yeniden başlatın.

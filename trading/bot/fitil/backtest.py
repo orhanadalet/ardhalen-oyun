@@ -371,9 +371,13 @@ def main() -> None:
         elif "spread" not in entry and "spread_points" in data[s].columns:
             point = sp.get("point") or 10.0 ** -sim_settings(s, entry)["digits"]
             active = data[s]["spread_points"][(data[s].index.hour >= 7) & (data[s].index.hour < 17)]
-            if len(active) and np.isfinite(active.median()):
-                entry["spread"] = float(active.median()) * point
+            med = float(active[active > 0].median()) if (active > 0).any() else float("nan")
+            if np.isfinite(med) and med > 0:
+                entry["spread"] = med * point
                 print(f"{s}: veriden ölçülen ortanca spread (07-17 UTC) = {entry['spread']:.5g}")
+            else:
+                print(f"{s}: veride spread kaydı yok (0); varsayılan spread kullanılıyor: "
+                      f"{sim_settings(s, entry)['spread']:.5g}")
         symbols[s] = entry
     cfg = replace(cfg, symbols=symbols)
     print(f"Maliyet: komisyon {a.commission:g} USD/lot, swap {'yok' if a.no_swap else 'varsayılan'}, "

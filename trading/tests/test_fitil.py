@@ -1892,6 +1892,28 @@ class ServerClockDetection(unittest.TestCase):
         self.assertIn("server_time", str(ctx.exception))
 
 
+class ZeroSpreadData(unittest.TestCase):
+    def test_zero_spread_in_data_falls_back_to_default(self):
+        import contextlib
+        import io
+        from unittest import mock
+        df = fx_week_schedule("2024-01-01", "2024-03-01")
+        df["spread_points"] = 0                                    # broker bu ürün için spread kaydetmemiş
+        with tempfile.TemporaryDirectory() as d:
+            df.to_csv(Path(d) / "BRENTCash.csv")
+            (Path(d) / "c.json").write_text(json.dumps({"symbols": {"BRENTCash": {"usd_beta": 0, "group": "oil"}}}),
+                                            encoding="utf-8")
+            out = io.StringIO()
+            with mock.patch.object(sys, "argv", ["fitil.backtest", "--config", str(Path(d) / "c.json"), "--data", d,
+                                                 "--commission", "0", "--no-swap"]), contextlib.redirect_stdout(out):
+                bt.main()
+            self.assertIn("veride spread kaydı yok (0); varsayılan spread kullanılıyor: 0.04", out.getvalue())
+        b = PaperBroker({"EURUSD": df.iloc[:2000]}, {"EURUSD": SPEC}, {"EURUSD": 1e5}, {"EURUSD": "quote"},
+                        {"EURUSD": 0.0001}, start=df.index[1500])
+        t = b.tick("EURUSD")
+        self.assertAlmostEqual(t.ask - t.bid, 0.0001)                # sıfır spread'li çubuk sabit spread'e düşer
+
+
 class Plan(unittest.TestCase):
     def test_expectation_drives_outcome_and_brake_limits_damage(self):
         from fitil.plan import required_equity, simulate

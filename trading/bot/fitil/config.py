@@ -51,9 +51,12 @@ class Config:
     # Zaman (UTC)
     entry_hours: tuple = (7, 17)      # [başlangıç, bitiş) saatleri arasında yeni giriş
     flat_hour: int = 20               # bu saatte pozisyonlar kapatılır (rollover öncesi)
-    # Kazananı gece taşı: gün sonunda yalnızca stopu kâra kilitlenmiş (kaybedemeyecek) pozisyonlar açık kalır,
-    # risk taşıyanlar kapatılır. Cuma günü her şey kapanır (hafta sonu boşluğu).
-    hold_winners: bool = False
+    # Gece taşıma (pazartesi-perşembe; cuma gün sonunda her şey kapanır, hafta sonu boşluğu):
+    #   "none":    gün sonunda her şey kapanır
+    #   "winners": yalnızca stopu kâra kilitlenmiş (kaybedemeyecek) pozisyonlar taşınır
+    #   "all":     hiçbiri gün sonunda kapatılmaz; çıkışı stop ve iz süren stop belirler
+    overnight: str = "none"
+    hold_winners: bool = False        # eski ayar: true ise overnight = "winners"
     blackouts: list = field(default_factory=list)   # ["2026-11-18T19:00", ...] UTC, yüksek etkili veri
     blackout_minutes: int = 15        # veri saatinin bu kadar öncesi/sonrası giriş yok
     recurring_blackouts: list = field(default_factory=lambda: [
@@ -126,6 +129,10 @@ class Config:
             raise ValueError("strategy.bar_minutes 5, 15, 30 ya da 60 olmalı")
         if not 0 < self.dd_half_risk < self.dd_halt < 1:
             raise ValueError("dd_half_risk < dd_halt olmalı")
+        if self.hold_winners and self.overnight == "none":
+            self.overnight = "winners"
+        if self.overnight not in ("none", "winners", "all"):
+            raise ValueError('overnight "none", "winners" ya da "all" olmalı')
         if not 0 <= self.withdraw_frac <= 1:
             raise ValueError("withdraw_frac 0-1 aralığında olmalı")
         if not 0 < self.daily_loss_limit <= 0.10:

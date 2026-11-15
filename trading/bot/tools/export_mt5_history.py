@@ -65,6 +65,7 @@ def resolve_server_clock(cfg: Config, mt5, minutes: int, max_bars: int) -> tuple
         if mt5.symbol_info(sym) is None:
             continue
         mt5.symbol_select(sym, True)
+        print(f"Sunucu saati {sym} geçmişinden çıkarılıyor (ilk çalıştırmada birkaç dakika sürebilir)...", flush=True)
         rates = read_all(mt5, sym, tf, max_bars)
         if len(rates) == 0:
             continue
@@ -111,6 +112,7 @@ def _write_zip(broker, mt5, tf, zpath: Path, symbols: list[str], stamp: str, min
     with zipfile.ZipFile(zpath, "w", compression=zipfile.ZIP_DEFLATED) as z:
         for sym in symbols:
             info = mt5.symbol_info(sym)
+            print(f"{sym:10s} okunuyor...", end="\r", flush=True)
             rates = read_all(mt5, sym, tf, max_bars)
             if len(rates) == 0:
                 print(f"{sym:10s} veri yok (Market Watch'ta açık mı?)")

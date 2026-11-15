@@ -116,6 +116,10 @@ class PaperBroker:
         # Gece taşıma maliyeti: sembol -> (long, short) hesap para birimi / lot / gece. Çarşamba 3 kat.
         # 21:00 UTC'yi (rollover) geçen her pozisyona işlenir.
         self.swap = swap or {}
+        # Çubuk başına spread: veride "spread_points" sütunu varsa (MT5 dışa aktarımı) sabit spread yerine kullanılır.
+        self._bar_spread = {s: (df["spread_points"] * specs[s].point) for s, df in data.items()
+                            if "spread_points" in df.columns}
+        self._cur_spread: dict[str, float] = {}
         self._swap_acc: dict[int, float] = {}
         self._swap_day = None
         self.data, self.specs, self.contract, self.usd_side, self.spread = data, specs, contract, usd_side, spread
@@ -154,13 +158,15 @@ class PaperBroker:
             if t not in df.index:
                 continue
             b = df.loc[t]
+            sp = self._spread_at(s, t)
             for p in [p for p in self._pos.values() if p.symbol == s]:
                 slip = self.slippage.get(s, 0.0)
                 if p.direction > 0 and b["low"] <= p.sl:
                     self._settle(p, min(p.sl, b["open"]) - slip, t + self.bar, "stop")
-                elif p.direction < 0 and b["high"] + self.spread[s] >= p.sl:
-                    self._settle(p, max(p.sl, b["open"] + self.spread[s]) + slip, t + self.bar, "stop")
+                elif p.direction < 0 and b["high"] + sp >= p.sl:
+                    self._settle(p, max(p.sl, b["open"] + sp) + slip, t + self.bar, "stop")
             self._last[s] = float(b["close"])
+            self._cur_spread[s] = sp
         if self.swap and t.hour >= 21 and self._swap_day != t.date():
             self._swap_day = t.date()
             nights = 3 if t.weekday() == 2 else 1
@@ -183,7 +189,7 @@ class PaperBroker:
 
     def _exit_price(self, p: Pos) -> float:
         bid = self._last[p.symbol]
-        return bid if p.direction > 0 else bid + self.spread[p.symbol]
+        return bid if p.direction > 0 else bid + self._spread_now(p.symbol)
 
     def heartbeat(self) -> None:
         return None
@@ -207,7 +213,23 @@ class PaperBroker:
         if symbol not in self._last:
             return None
         bid = self._last[symbol]
-        return Tick(bid, bid + self.spread[symbol], self.now())
+        return Tick(bid, bid + self._spread_now(symbol), self.now())
+
+    def _spread_at(self, symbol: str, t) -> float:
+        bars = self._bar_spread.get(symbol)
+        if bars is not None and t in bars.index:
+            v = float(bars.loc[t])
+            if v > 0 and v == v:
+                return v
+        return self.spread[symbol]
+
+    def _spread_now(self, symbol: str) -> float:
+        """Son kapanmış çubuğun spread'i (veride yoksa sabit spread)."""
+        if symbol not in self._cur_spread:
+            idx = self.data[symbol].index
+            k = idx.searchsorted(self.clock, side="left")
+            self._cur_spread[symbol] = self._spread_at(symbol, idx[k - 1]) if k > 0 else self.spread[symbol]
+        return self._cur_spread[symbol]
 
     def last_bar_time(self, symbol: str) -> datetime | None:
         idx = self.data[symbol].index

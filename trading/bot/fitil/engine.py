@@ -267,15 +267,16 @@ class Engine:
             self._save()
 
     def _may_hold(self, p: Pos, now: datetime, at_day_end: bool = False) -> bool:
-        """hold_winners açıkken stopu girişin kâr tarafında olan pozisyon açık kalabilir.
+        """Gece taşıma kuralı (config.overnight). "winners": yalnızca stopu kâra kilitli pozisyon; "all": hepsi.
 
         Gün sonunda: pazartesi-perşembe gece taşınır, cuma kapanır (hafta sonu boşluğu).
         Gün içinde: taşınmış pozisyon o günün gün sonuna kadar yönetilmeye devam eder (cuma dahil);
         sığ gece saatlerinde kapatılmaz.
         """
-        if not self.cfg.hold_winners or now.weekday() >= 5 or (at_day_end and now.weekday() >= 4):
+        mode = self.cfg.overnight
+        if mode == "none" or now.weekday() >= 5 or (at_day_end and now.weekday() >= 4) or p.sl <= 0:
             return False
-        return p.sl > 0 and (p.sl - p.entry) * p.direction > 0
+        return mode == "all" or (p.sl - p.entry) * p.direction > 0
 
     def _check_manual_sl(self, now: datetime, positions: list[Pos]) -> None:
         """Bot dışında değiştirilen stopu tespit eder (bot ancak kendi koyduğu stopu bilir)."""
