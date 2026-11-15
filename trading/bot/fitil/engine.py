@@ -22,8 +22,9 @@ from .strategy import Signal, atr, evaluate
 
 class Engine:
     def __init__(self, broker: Broker, cfg: Config, state_path: str | Path | None = None,
-                 journal_path: str | Path | None = None, dry_run: bool = False, log=print):
+                 journal_path: str | Path | None = None, dry_run: bool = False, log=print, signal_fn=None):
         self.broker, self.cfg, self.dry_run, self.log = broker, cfg, dry_run, log
+        self.signal_fn = signal_fn or evaluate          # sinyal üreticisi (yazı-tura karşılaştırması için değiştirilebilir)
         self.state_path = Path(state_path) if state_path else None
         self.journal_path = Path(journal_path) if journal_path else None
         self.seen: dict[str, datetime] = {}
@@ -32,7 +33,9 @@ class Engine:
                       # adj: para akışlarından arındırma çarpanı. "Ayarlı özkaynak" = özkaynak * adj; yalnızca
                       # işlem kâr/zararıyla değişir. peak_equity ve day_start_equity ayarlı birimdedir.
                       "adj": 1.0, "peak_time": "", "day_start_time": "",
-                      "peak_log": []}       # son zirve yükselişleri: [zaman, yükselişten önceki zirve]
+                      "peak_log": [],
+                      # Canlı işlem sonuçları (risk merdiveni ve rapor için): [{t, sym, r, pnl, kind}]
+                      "results": [], "bot_closed": [], "ladder": 0.5}       # son zirve yükselişleri: [zaman, yükselişten önceki zirve]
         self._warned: set[str] = set()
         if self.state_path and self.state_path.exists():
             try:
@@ -204,6 +207,80 @@ class Engine:
             return 0.0
         return 0.5 if dd >= self.cfg.dd_half_risk else 1.0
 
+    def ladder_factor(self) -> float:
+        """Risk merdiveni: canlı sonuçların kanıtına göre 0.5x, 1x ya da 2x. Kapalıysa 1x."""
+        if not self.cfg.risk_ladder:
+            return 1.0
+        r = np.array([x["r"] for x in self.state["results"] if np.isfinite(x["r"])], dtype=float)
+        n = len(r)
+        if n < 100:
+            return 0.5
+        mean = float(r.mean())
+        se = float(r.std(ddof=1) / np.sqrt(n))
+        if float(r[-100:].mean()) < -0.1:
+            return 0.5                                   # son dönem belirgin kötü: kademe düşer
+        if n >= 300 and mean - se > 0:
+            return 2.0
+        return 1.0 if mean > 0 else 0.5
+
+    # ------------------------------------------------------------------ sonuç ve müdahale takibi
+    def _record_closed(self, now: datetime, live: set[str]) -> None:
+        """Brokerda artık görünmeyen pozisyonların sonucunu kaydeder; kimin kapattığını ayırt eder."""
+        changed = False
+        for t in [t for t in self.state["tickets"] if t not in live]:
+            meta = self.state["tickets"][t]
+            res = self.broker.closed_trade(int(t))
+            if res is None:
+                first = meta.setdefault("missing_since", now.isoformat())
+                if now - datetime.fromisoformat(first) > timedelta(hours=24):
+                    self._journal(now, "UYARI", meta.get("sym", ""), ticket=t, neden="kapanış kaydı bulunamadı")
+                    del self.state["tickets"][t]
+                changed = True
+                continue
+            if int(t) in self.state["bot_closed"]:
+                kind = "bot"
+            elif res.kind in ("stop", "stopout"):
+                kind = res.kind
+            else:
+                kind = "elle"
+            risk = meta.get("risk", 0.0)
+            r = res.pnl / risk if risk > 0 else float("nan")
+            self.state["results"].append({"t": res.close_time.isoformat(), "sym": meta.get("sym", ""),
+                                          "r": round(r, 4) if np.isfinite(r) else float("nan"),
+                                          "pnl": round(res.pnl, 2), "kind": kind})
+            self.state["results"] = self.state["results"][-2000:]
+            if kind == "elle":
+                self._journal(now, "MÜDAHALE", meta.get("sym", ""), ticket=t, neden="pozisyon elle kapatıldı",
+                              R=round(r, 2) if np.isfinite(r) else None)
+            elif kind == "stopout":
+                self._journal(now, "UYARI", meta.get("sym", ""), ticket=t, neden="broker teminat yetersizliğiyle kapattı")
+            self._journal(now, "SONUÇ", meta.get("sym", ""), ticket=t, tur=kind, pnl=round(res.pnl, 2),
+                          R=round(r, 2) if np.isfinite(r) else None)
+            del self.state["tickets"][t]
+            changed = True
+        if changed:
+            level = self.ladder_factor()
+            if level != self.state["ladder"]:
+                self._journal(now, "KADEME", "", eski=self.state["ladder"], yeni=level,
+                              islem=len(self.state["results"]))
+                self.state["ladder"] = level
+            self._save()
+
+    def _check_manual_sl(self, now: datetime, positions: list[Pos]) -> None:
+        """Bot dışında değiştirilen stopu tespit eder (bot ancak kendi koyduğu stopu bilir)."""
+        for p in positions:
+            meta = self.state["tickets"].get(str(p.ticket))
+            if not meta or "sl" not in meta or p.sl <= 0:
+                continue
+            point = self.broker.spec(p.symbol).point
+            if abs(p.sl - meta["sl"]) > point / 2:
+                farther = (meta["sl"] - p.sl) * p.direction > 0
+                self._journal(now, "MÜDAHALE", p.symbol, ticket=p.ticket, eski=meta["sl"], yeni=p.sl,
+                              neden="stop elle uzaklaştırıldı (risk arttı)" if farther else "stop elle yaklaştırıldı")
+                meta["sl"] = p.sl
+                meta["manual_sl"] = meta.get("manual_sl", 0) + 1
+                self._save()
+
     def entry_block(self, now: datetime, equity: float, n_positions: int, symbol: str | None = None,
                     since: datetime | None = None) -> str | None:
         """Yeni giriş yasaksa nedenini döndürür."""
@@ -257,11 +334,8 @@ class Engine:
             positions = b.positions()
 
         live = {str(p.ticket) for p in positions}
-        stale = [t for t in self.state["tickets"] if t not in live]
-        if stale:
-            for t in stale:
-                del self.state["tickets"][t]
-            self._save()
+        self._record_closed(now, live)
+        self._check_manual_sl(now, positions)
 
         if now.hour >= c.flat_hour or now.weekday() >= 5:
             for p in positions:
@@ -312,7 +386,7 @@ class Engine:
             tick = b.tick(sym)
             if tick is None:
                 continue
-            sig = evaluate(df, c.strategy, tick.ask - tick.bid)
+            sig = self.signal_fn(df, c.strategy, tick.ask - tick.bid)
             if sig is not None and self._enter(now, sym, sig, acct.equity, positions):
                 positions = b.positions()
 
@@ -332,7 +406,9 @@ class Engine:
         per_lot = b.loss_per_lot(sym, sig.direction, entry, sl)
         if per_lot <= 0:
             return False
-        risk_pct = c.risk_tiers.get(sig.score, min(c.risk_tiers.values())) * self.risk_factor(equity)
+        risk_pct = (c.risk_tiers.get(sig.score, min(c.risk_tiers.values())) * self.risk_factor(equity)
+                    * self.ladder_factor())
+        risk_pct = min(risk_pct, 0.02)                   # hiçbir koşulda işlem başına %2'yi aşmaz
         total, usd_net = self._open_risk(positions)
         budget = min(equity * risk_pct, max(0.0, equity * c.max_portfolio_risk - total))
         lots = round_lots_down(spec, budget / per_lot)
@@ -363,7 +439,9 @@ class Engine:
             return False
         p = max(opened, key=lambda x: x.open_time)
         self.state["trades_today"] += 1
-        self.state["tickets"][str(p.ticket)] = {"entry": p.entry, "init_dist": (p.entry - sl) * sig.direction}
+        self.state["tickets"][str(p.ticket)] = {"entry": p.entry, "init_dist": (p.entry - sl) * sig.direction,
+                                                "sl": p.sl, "sym": sym, "lots": p.lots,
+                                                "risk": b.loss_per_lot(sym, sig.direction, p.entry, p.sl) * p.lots}
         self._save()
         self._journal(now, "GİRİŞ", sym, ticket=p.ticket, dolum=p.entry, emir=res.message, **info)
         return True
@@ -402,6 +480,9 @@ class Engine:
         if (price - new_sl) * p.direction <= spec.stops_level:
             return                                    # fiyata fazla yakın
         if self.dry_run or self.broker.modify_sl(p, new_sl):
+            if not self.dry_run:
+                meta["sl"] = new_sl
+                self._save()
             self._journal(now, "STOP", p.symbol, ticket=p.ticket, eski=p.sl, yeni=new_sl, R=round(float(moved_r), 2))
 
     def _close(self, now: datetime, p: Pos, why: str) -> None:
@@ -413,6 +494,8 @@ class Engine:
         res = self.broker.close(p)
         if res.ok:
             self._close_retry.pop(p.ticket, None)
+            self.state["bot_closed"] = (self.state["bot_closed"] + [p.ticket])[-500:]
+            self._save()
         else:
             self._close_retry[p.ticket] = now + timedelta(seconds=60)
         self._journal(now, "ÇIKIŞ" if res.ok else "RED", p.symbol, ticket=p.ticket, neden=why,

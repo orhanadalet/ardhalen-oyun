@@ -4,7 +4,7 @@ Python ile yazılmış, MetaTrader 5'e bağlanan gün içi bot. 7 major parite, 
 her M15 çubuğu kapanışında tarama yapar.
 
 **Durum (Kasım 2026):**
-- Altyapı 120 testle ve üç bağımsız kod incelemesiyle sınandı (toplam 37 bulgu, hepsi düzeltildi).
+- Altyapı 129 testle ve üç bağımsız kod incelemesiyle sınandı (toplam 37 bulgu, hepsi düzeltildi).
 - MT5 bağlantısı gerçek terminalde çalıştırılmadı: terminal yalnızca Windows'ta çalışır ve bu geliştirme
   ortamında kurulamıyor. Bunun yerine MT5'in Python arayüzünü taklit eden bir simülatör yazıldı
   (`tests/mt5_sim.py`): canlı kod yolu (bağdaştırıcı + motor + komut satırı) bu simülatöre karşı baştan
@@ -33,7 +33,8 @@ her M15 çubuğu kapanışında tarama yapar.
 
 | Kural | Varsayılan |
 |---|---|
-| İşlem başına risk | %0,5 (geri çekilme kurulumu). Kademeler %0,25 / %0,5 / %1 yalnızca süpürme kurulumu açıkken kullanılır |
+| İşlem başına risk | %0,5 × risk merdiveni kademesi (aşağıda). Hiçbir koşulda %2'yi aşmaz |
+| Risk merdiveni | İlk 100 canlı işlem 0,5x (%0,25); beklenti pozitifse 1x (%0,5); 300+ işlemde kanıt güçlüyse 2x (%1); son 100 işlem kötüyse 0,5x'e iner |
 | Toplam açık risk | en fazla %3 |
 | Tek USD yönünde net risk | en fazla %2 |
 | Günlük kayıp sınırı | %3 (aşılınca o gün yeni giriş yok) |
@@ -64,6 +65,63 @@ Gerçek hesapta çalışmayı bot varsayılan olarak reddeder (`--allow-real` ge
 Çalışırken `fitil_journal.csv` (her sinyal, giriş, stop taşıma, çıkış, çekim önerisi) ve
 `fitil_state.json` (gün başı özkaynak, zirve, günlük işlem sayısı) oluşur. `fitil.bat` çift
 tıklamayla sinyal modunda başlatır.
+
+## Birleşik sistem: matematik ne söylüyor
+
+Soru: veri, teknik analiz, kasa yönetimi, risk analizi ve psikolojiyi birleştirmek sonucu nasıl etkiler?
+Üç deney, hepsi gerçek veriyle:
+
+**1. Daha fazla teknik filtre: aşırı uyum.** 554 gerçek geri çekilme işlemi; filtreler EURUSD 2019-20'de
+seçildi, diğer üç veri setinde sınandı.
+
+| Filtre sayısı | Denenen kombinasyon | Seçildiği veride | Görülmemiş veride |
+|---|---|---|---|
+| 0 | — | +0,14R | -0,05R |
+| 1 | 48 | +0,43R | +0,02R |
+| 2 | 602 | +0,64R | -0,07R |
+| 3 | 2.079 | +0,61R | -0,20R |
+
+Filtre eklendikçe geçmiş güzelleşiyor, gelecek kötüleşiyor. Bu yüzden Fitil'e gösterge yığılmadı; bir araç
+ancak tek başına, görülmemiş veride değer kattığı ölçülürse eklenir.
+
+**2. Yön seçiminin değeri: yazı-turaya karşı.** Aynı veri, stop, çıkış ve maliyet; yalnız yön yazı-tura
+(`python -m fitil.backtest --coin`):
+
+| EURUSD M15 2019-20 | İşlem | İşlem başı beklenti |
+|---|---|---|
+| Fitil'in geri çekilme kuralı | 197 | +0,140R (std. hata 0,107) |
+| Yazı-tura | 693 | -0,135R (std. hata 0,046) |
+| **Yön seçiminin değeri** | | **+0,275R (std. hata 0,116)** |
+
+Bu veride analiz, rastgele yöne göre işlem başına yaklaşık 0,28R kazandırıyor ve fark istatistiksel olarak
+belirgin. Diğer veri setlerinde de bu ölçüm yapılmalı; avantajın gerçekten var olup olmadığını bu söyler.
+
+**3. Psikoloji: aynı sistem, farklı insan.** Gerçek işlem sonuçlarından iki yıllık 20.000 yol:
+
+| Davranış | Medyan sonuç | Kötü %5 | Zararda bitirme | Yarıyı kaybetme |
+|---|---|---|---|---|
+| Disiplinli (%0,5 sabit risk) | +%28 | +%2 | %4 | %0 |
+| Erken kâr alma (0,5R'de kapatma) | -%40 | -%46 | %100 | %0,2 |
+| Kayıptan sonra riski ikiye katlama | +%94 | -%52 | %22 | %13,6 |
+| Kazanınca riski artırma | +%41 | -%5 | %8 | %0 |
+| %10 düşüşte 30 işlem ara | +%28 | +%1 | %5 | %0 |
+
+Aynı işlemlerle disiplinli insan kazanıyor; erken kâr alan kesin kaybediyor; ikiye katlayan medyanda daha
+çok kazanıyor ama her yedi yoldan birinde hesabın yarısını kaybediyor.
+
+**Bu sonuçlarla ne yapıldı:**
+
+- **Risk merdiveni:** kasa büyütme kanıta bağlandı; işlem başına risk canlı sonuçlar arttıkça yükselir,
+  kötüleşince düşer, hiçbir koşulda %2'yi aşmaz.
+- **İnsan müdahalesi tespiti:** botun pozisyonunu elle kapatmak ya da stopunu değiştirmek günlüğe
+  `MÜDAHALE` olarak yazılır; kapanışlar "stop / bot / elle" diye ayrılıp sonuçları ayrı ölçülür.
+- **Haftalık rapor:** `python -m fitil.report --expected-r 0.14` canlı beklentiyi backtest ile
+  karşılaştırır, merdiven kademesini, düşüşü ve müdahalelerin maliyetini gösterir.
+- **Yazı-tura ölçümü:** `python -m fitil.backtest --coin`, her veride yön seçiminin değerini ölçer.
+
+Yapılmayanlar ve nedenleri: daha fazla gösterge filtresi (deney 1: aşırı uyum), kayıp sonrası zorunlu ara
+(deney 3: sonucu değiştirmedi), kayıptan sonra risk artırma (deney 3: yıkım riski). Martingale ve stopsuz
+işlem zaten imkânsız.
 
 ## Güvenlik davranışları
 

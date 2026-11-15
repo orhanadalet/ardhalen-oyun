@@ -104,6 +104,11 @@ trading/
   - Gerçek örnek veri: `python bot/tools/fetch_sample_data.py` (EURUSD M1 2019-20 ve H1 2017; altın M5
     2021; vadeli altın M5 2020-22 ve ham petrol M1 2021, ikisi yalnız NY seansı). Diğer pariteler için
     gün içi veri hâlâ kullanıcıdan gelmeli.
+  - Birleşik sistem deneyleri (`bot/README.md`): filtre eklemek görülmemiş veride sonucu kötüleştirdi
+    (aşırı uyum); yön seçimi yazı-turaya göre +0,28R (EURUSD 2019-20); erken kâr alma ve kayıptan sonra
+    ikiye katlama aynı işlemlerle sonucu yıktı. Yeni araç/gösterge önerirken önce `--coin` ve `--wf` ile ölç.
+  - Kasa: risk merdiveni (`risk_ladder`) canlı kanıta bağlı, en çok %2. Müdahaleler `MÜDAHALE` olarak
+    günlüğe yazılır; `python -m fitil.report` haftalık özeti verir.
   - Bu ortamda paket indirmek gerekirse pip'i ortam proxy'sinden geçir (`NO_PROXY= no_proxy= pip ...`).
     Paket kodunu çalıştırma; yalnızca veri dosyalarını aç. `tick-backtest` paketindeki tick verisi sentetiktir.
   - MT5 terminali bu ortamda çalıştırılamaz (Wine yok, apt ve MetaQuotes sunucuları ağ politikasıyla kapalı).

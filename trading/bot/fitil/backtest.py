@@ -108,9 +108,13 @@ def load_m15(path: str | Path, tz_shift_hours: float = 0.0, minutes: int = 15) -
 
 
 def run(data: dict[str, pd.DataFrame], cfg: Config, equity: float = 10_000.0, start=None, end=None,
-        commission_per_lot: float = 7.0, log=lambda *_: None):
-    """(işlemler, günlük özkaynak serisi, motor) döndürür."""
-    cfg = replace(cfg, settle_sec=0.0, max_signal_age_sec=1.0)
+        commission_per_lot: float = 7.0, log=lambda *_: None, ladder: bool = False, signal_fn=None):
+    """(işlemler, günlük özkaynak serisi, motor) döndürür.
+
+    ladder: risk merdiveni varsayılan olarak KAPALI (strateji sabit riskle ölçülür; merdiven canlı kanıt içindir).
+    signal_fn: sinyal üreticisini değiştirir (ör. yazı-tura karşılaştırması).
+    """
+    cfg = replace(cfg, settle_sec=0.0, max_signal_age_sec=1.0, risk_ladder=ladder)
     if end is not None:
         data = {s: d.loc[:pd.Timestamp(end)] for s, d in data.items()}
     sim = {s: sim_settings(s, cfg.symbols[s]) for s in data}
@@ -126,7 +130,7 @@ def run(data: dict[str, pd.DataFrame], cfg: Config, equity: float = 10_000.0, st
                          equity=equity, commission_per_lot=commission_per_lot,
                          slippage={s: v["slippage"] for s, v in sim.items()}, start=start,
                          bar=pd.Timedelta(minutes=cfg.strategy.bar_minutes).to_pytimedelta())
-    engine = Engine(broker, cfg, log=log)
+    engine = Engine(broker, cfg, log=log, signal_fn=signal_fn)
     days, values = [], []
     while True:
         engine.step()
@@ -190,6 +194,44 @@ def report(trades: pd.DataFrame, equity: pd.Series) -> str:
     return "\n".join(out)
 
 
+def coin_signal(seed: int, rate: float, stop_atr: float = 1.5):
+    """Yönü yazı-turayla seçen sinyal üreticisi: her çubukta `rate` olasılıkla giriş, stop stop_atr x ATR."""
+    from .strategy import Signal, atr
+    rng = np.random.default_rng(seed)
+
+    def signal(df: pd.DataFrame, p, spread: float):
+        if len(df) < p.atr_period + 2 or rng.random() > rate:
+            return None
+        h, l, c = (df[k].to_numpy(dtype=float) for k in ("high", "low", "close"))
+        a = atr(h, l, c, p.atr_period)
+        d = int(rng.choice([-1, 1]))
+        return Signal(d, float(c[-1] - d * stop_atr * a), 2, "yazı-tura", "rastgele yön")
+    return signal
+
+
+def coin_baseline(data: dict[str, pd.DataFrame], cfg: Config, equity: float = 10_000.0, start=None, end=None,
+                  seeds: int = 6) -> dict:
+    """Stratejinin yön seçiminin değerini ölçer: aynı veri, aynı stop/çıkış/maliyet kuralları, ama yön yazı-tura.
+
+    Dönüş: strateji ve yazı-tura için işlem sayısı, ortalama R ve standart hata; fark = yön seçiminin değeri.
+    """
+    real, _, _ = run(data, cfg, equity, start, end)
+    bars = sum(int(((d.index.hour >= cfg.entry_hours[0]) & (d.index.hour < cfg.entry_hours[1])).sum())
+               for d in data.values())
+    rate = min(1.0, 3.0 * max(len(real), 1) / max(bars, 1))   # rastgele girişler sınırlarla elendiği için fazlası
+    coins = [run(data, cfg, equity, start, end, signal_fn=coin_signal(s, rate))[0] for s in range(seeds)]
+    coin = pd.concat([c for c in coins if len(c)], ignore_index=True) if any(len(c) for c in coins) else pd.DataFrame(columns=["r"])
+
+    def stat(t):
+        n = len(t)
+        m = float(t["r"].mean()) if n else float("nan")
+        se = float(t["r"].std(ddof=1) / np.sqrt(n)) if n > 1 else float("nan")
+        return {"islem": n, "ort_R": m, "std_hata": se}
+    s, c = stat(real), stat(coin)
+    diff_se = float(np.sqrt(s["std_hata"] ** 2 + c["std_hata"] ** 2))
+    return {"strateji": s, "yazi_tura": c, "fark_R": s["ort_R"] - c["ort_R"], "fark_std_hata": diff_se}
+
+
 def _score(trades: pd.DataFrame, min_trades: int) -> float:
     """Parametre seçimi için ölçüt: ortalama R (yeterli işlem yoksa -sonsuz)."""
     if len(trades) < min_trades:
@@ -248,6 +290,7 @@ def main() -> None:
     ap.add_argument("--equity", type=float, default=10_000.0)
     ap.add_argument("--tz-shift", type=float, default=0.0, help="verinin UTC'den farkı (saat); MT5 sunucu saati için ör. 2")
     ap.add_argument("--trades-out", help="işlem listesini CSV olarak yaz")
+    ap.add_argument("--coin", action="store_true", help="yön seçiminin değerini yazı-turaya karşı ölç")
     ap.add_argument("--wf", action="store_true", help="walk-forward: parametreyi geçmişte seç, görülmemiş dönemde sına")
     ap.add_argument("--train-days", type=int, default=120)
     ap.add_argument("--test-days", type=int, default=30)
@@ -270,6 +313,14 @@ def main() -> None:
     if not data:
         raise SystemExit("Hiç veri dosyası bulunamadı")
     cfg = replace(cfg, symbols={s: cfg.symbols[s] for s in data})
+    if a.coin:
+        res = coin_baseline(data, cfg, a.equity, a.start, a.end)
+        s, c = res["strateji"], res["yazi_tura"]
+        print(f"\nStrateji : {s['islem']:5d} işlem, ortalama {s['ort_R']:+.3f}R (std. hata {s['std_hata']:.3f})")
+        print(f"Yazı-tura: {c['islem']:5d} işlem, ortalama {c['ort_R']:+.3f}R (std. hata {c['std_hata']:.3f})")
+        print(f"Yön seçiminin değeri: {res['fark_R']:+.3f}R (std. hata {res['fark_std_hata']:.3f}). "
+              "Aynı stop, çıkış ve maliyet; tek fark yönün nasıl seçildiği.")
+        return
     if a.wf:
         folds, oos = walk_forward(data, cfg, WF_GRID, a.train_days, a.test_days, equity=a.equity)
         pd.set_option("display.width", 200)

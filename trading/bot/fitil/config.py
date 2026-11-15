@@ -73,6 +73,11 @@ class Config:
     trail_start_r: float = 1.5        # bu kadar R'den sonra stop yapıyı izler
     trail_bars: int = 8
 
+    # Risk merdiveni: işlem başına risk, CANLI sonuçların kanıtına göre ölçeklenir (kademe çarpanı):
+    #   ilk 100 işlem 0.5x; 100+ işlemde ortalama R > 0 ise 1x; 300+ işlemde ortalama R bir standart hata
+    #   farkla sıfırın üstündeyse 2x. Son 100 işlemin ortalaması -0,1R'nin altına düşerse 0.5x'e iner.
+    risk_ladder: bool = True
+
     # Çekim önerisi: haftada bir, önceki zirveyi aşan kârın bu kadarı çekilmek üzere önerilir.
     # Bot para çekemez; yalnızca tutarı günlüğe yazar. 0 = kapalı.
     withdraw_frac: float = 0.5

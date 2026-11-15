@@ -51,6 +51,15 @@ class Pos:
 
 
 @dataclass(frozen=True)
+class ClosedTrade:
+    """Kapanmış bir pozisyonun brokerdaki sonucu."""
+    ticket: int
+    pnl: float              # net: komisyon ve swap dahil, hesap para biriminde
+    close_time: datetime    # UTC
+    kind: str               # "stop" (stop-loss), "stopout" (teminat yetersizliği), "close" (emirle kapatıldı)
+
+
+@dataclass(frozen=True)
 class OrderResult:
     ok: bool
     ticket: int = 0
@@ -77,6 +86,7 @@ class Broker(Protocol):
     def market_order(self, symbol: str, direction: int, lots: float, sl: float, comment: str) -> OrderResult: ...
     def modify_sl(self, pos: Pos, sl: float) -> bool: ...
     def close(self, pos: Pos) -> OrderResult: ...
+    def closed_trade(self, ticket: int) -> ClosedTrade | None: ...    # henüz geçmişte yoksa None
 
 
 def round_lots_down(spec: Spec, lots: float) -> float:
@@ -223,6 +233,14 @@ class PaperBroker:
             return False
         self._pos[pos.ticket].sl = sl
         return True
+
+    def closed_trade(self, ticket: int) -> ClosedTrade | None:
+        for t in reversed(self.closed):
+            if t["ticket"] == ticket:
+                when = t["close_time"]
+                when = when.to_pydatetime() if hasattr(when, "to_pydatetime") else when
+                return ClosedTrade(ticket, t["pnl"], when, "stop" if t["reason"] == "stop" else "close")
+        return None
 
     def close(self, pos: Pos) -> OrderResult:
         if pos.ticket not in self._pos:

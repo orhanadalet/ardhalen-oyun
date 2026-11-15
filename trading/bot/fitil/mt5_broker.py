@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 import pandas as pd
 
-from .broker import Account, FatalError, OrderResult, Pos, Spec, Tick
+from .broker import Account, ClosedTrade, FatalError, OrderResult, Pos, Spec, Tick
 from .config import Config
 
 EPOCH = datetime(1970, 1, 1)
@@ -280,6 +280,24 @@ class MT5Broker:
             "magic": self.cfg.magic, "comment": "fitil-kapat", "type_time": self.mt5.ORDER_TIME_GTC,
             "type_filling": self._filling(pos.symbol),
         })
+
+    def closed_trade(self, ticket: int) -> ClosedTrade | None:
+        """Pozisyonun tüm işlemlerinden (giriş + çıkış) net sonucu. Çıkış henüz geçmişte yoksa None."""
+        try:
+            deals = self.mt5.history_deals_get(position=ticket)
+        except TypeError:
+            return None
+        if not deals:
+            return None
+        outs = [d for d in deals if d.entry in (self.mt5.DEAL_ENTRY_OUT, self.mt5.DEAL_ENTRY_INOUT,
+                                                 getattr(self.mt5, "DEAL_ENTRY_OUT_BY", 3))]
+        if not outs:
+            return None
+        pnl = sum(float(d.profit) + float(getattr(d, "commission", 0.0)) + float(getattr(d, "swap", 0.0))
+                  + float(getattr(d, "fee", 0.0)) for d in deals)
+        last = max(outs, key=lambda d: d.time)
+        kind = {self.mt5.DEAL_REASON_SL: "stop", self.mt5.DEAL_REASON_SO: "stopout"}.get(last.reason, "close")
+        return ClosedTrade(ticket, pnl, self._utc(last.time), kind)
 
     def shutdown(self) -> None:
         self.mt5.shutdown()

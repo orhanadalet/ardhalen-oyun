@@ -46,5 +46,6 @@
   "daily_loss_limit": 0.03,
   "max_trades_per_day": 20,
   "max_positions": 5,
-  "withdraw_frac": 0.5
+  "withdraw_frac": 0.5,
+  "risk_ladder": true
 }

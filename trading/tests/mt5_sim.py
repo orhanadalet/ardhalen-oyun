@@ -16,6 +16,10 @@ import numpy as np
 EPOCH = datetime(1970, 1, 1)
 
 
+def pd_ts(x):
+    return x.to_pydatetime() if hasattr(x, "to_pydatetime") else x
+
+
 class SimMT5:
     ACCOUNT_TRADE_MODE_DEMO, ACCOUNT_TRADE_MODE_REAL = 0, 2
     SYMBOL_TRADE_MODE_FULL = 4
@@ -27,6 +31,8 @@ class SimMT5:
     ORDER_FILLING_FOK, ORDER_FILLING_IOC, ORDER_FILLING_RETURN = 0, 1, 2
     TRADE_RETCODE_PLACED, TRADE_RETCODE_DONE, TRADE_RETCODE_DONE_PARTIAL = 10008, 10009, 10010
     TRADE_RETCODE_INVALID_STOPS, TRADE_RETCODE_REJECT = 10016, 10006
+    DEAL_ENTRY_IN, DEAL_ENTRY_OUT, DEAL_ENTRY_INOUT, DEAL_ENTRY_OUT_BY = 0, 1, 2, 3
+    DEAL_REASON_CLIENT, DEAL_REASON_EXPERT, DEAL_REASON_SL, DEAL_REASON_SO = 0, 3, 4, 6
     DEAL_TYPE_BALANCE, DEAL_TYPE_CREDIT, DEAL_TYPE_CHARGE, DEAL_TYPE_CORRECTION, DEAL_TYPE_BONUS = 2, 3, 4, 5, 6
     TRADE_RETCODE_REQUOTE = 10004
 
@@ -49,6 +55,7 @@ class SimMT5:
         self.max_deviation_check = max_deviation_check
         self.wall_extra = 0.0                             # canlı piyasa: beklerken tick saati ilerler
         self.price_drift = 0.0                            # emir anında fiyat kayması (requote sınaması)
+        self.api_closed: set[int] = set()                 # Python API ile kapatılan pozisyonlar (neden: EXPERT)
         self._err = (1, "Success")
 
     # --- zaman: UTC -> sunucu epoch'u ---
@@ -170,6 +177,7 @@ class SimMT5:
             if pos is None or direction != -pos.direction or abs(request["volume"] - pos.lots) > 1e-9:
                 return NS(retcode=self.TRADE_RETCODE_REJECT, order=0, price=0.0, comment="bad close request")
             res = self.paper.close(pos)
+            self.api_closed.add(pos.ticket)
             return NS(retcode=self.TRADE_RETCODE_DONE, order=900_000 + pos.ticket, price=res.price, comment="done")
         res = self.paper.market_order(symbol, direction, request["volume"], request.get("sl", 0.0), request.get("comment", ""))
         if not res.ok:
@@ -179,7 +187,19 @@ class SimMT5:
             self._hidden[res.ticket] = self.position_lag_calls
         return NS(retcode=self.TRADE_RETCODE_DONE, order=500_000 + res.ticket, price=res.price, comment="done")
 
-    def history_deals_get(self, date_from, date_to):
+    def history_deals_get(self, date_from=None, date_to=None, position=None):
+        if position is not None:                          # bir pozisyonun giriş ve çıkış işlemleri
+            t = next((x for x in self.paper.closed if x["ticket"] == position), None)
+            if t is None:
+                return ()
+            commission = self.paper.commission * t["lots"]
+            gross = t["pnl"] + commission
+            reason = (self.DEAL_REASON_SL if t["reason"] == "stop" else
+                      self.DEAL_REASON_EXPERT if position in self.api_closed else self.DEAL_REASON_CLIENT)
+            return (NS(entry=self.DEAL_ENTRY_IN, profit=0.0, commission=-commission, swap=0.0, reason=self.DEAL_REASON_EXPERT,
+                       time=self.srv(t["open_time"]), position_id=position),
+                    NS(entry=self.DEAL_ENTRY_OUT, profit=gross, commission=0.0, swap=0.0, reason=reason,
+                       time=self.srv(pd_ts(t["close_time"])), position_id=position))
         out = []
         for t, a in self.paper._flows:
             n = self._deal_calls.get((t, a), 0)

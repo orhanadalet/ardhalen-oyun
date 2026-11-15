@@ -1464,6 +1464,177 @@ class SimulatedTerminalQuirks(unittest.TestCase):
         self.assertEqual(sum("AKIŞ" in x for x in logs), 1)
 
 
+class CombinedSystem(unittest.TestCase):
+    """Canlı sonuç takibi, kimin kapattığının ayrımı, stop müdahalesi, risk merdiveni, rapor, yazı-tura ölçümü."""
+
+    def setUp(self):
+        self.df, _ = with_sweep_low(m15())
+        self.logs = []
+
+    def forward(self, closes, conf=None, after_entry=None):
+        df = self.df
+        idx = pd.date_range(df.index[-1] + pd.Timedelta(minutes=15), periods=len(closes), freq="15min")
+        c = np.array(closes, dtype=float)
+        o = np.concatenate([[df.close.iloc[-1]], c[:-1]])
+        tail = pd.DataFrame({"open": o, "high": np.maximum(o, c) + 0.00002, "low": np.minimum(o, c) - 0.00002,
+                             "close": c}, index=idx)
+        b = paper(pd.concat([df, tail]), start=idx[0])
+        e = Engine(b, conf or cfg(), log=self.logs.append)
+        e.step()
+        self.assertEqual(len(b.positions()), 1)
+        if after_entry:
+            after_entry(b, e)
+        while b.advance():
+            e.step()
+        e.step()
+        return b, e
+
+    def test_stop_and_day_end_closes_are_recorded_with_kind_and_r(self):
+        c0 = self.df.close.iloc[-1]
+        b, e = self.forward([c0 - 0.0003, c0 - 0.0008, c0 - 0.0015, c0 - 0.0015])
+        res = e.state["results"]
+        self.assertEqual([x["kind"] for x in res], ["stop"])
+        self.assertAlmostEqual(res[0]["pnl"], b.closed[0]["pnl"], places=2)
+        self.assertTrue(-1.15 < res[0]["r"] < -0.9, res[0]["r"])
+        self.assertEqual(e.state["tickets"], {})
+        b2, e2 = self.forward([c0 + 0.00001 * (k % 3) for k in range(48)])
+        self.assertEqual([x["kind"] for x in e2.state["results"]], ["bot"])
+        self.assertFalse([x for x in self.logs if "MÜDAHALE" in x])
+
+    def test_manual_close_is_detected_as_intervention(self):
+        c0 = self.df.close.iloc[-1]
+
+        def human(b, e):
+            b.close(b.positions()[0])                                    # kullanıcı MT5'ten elle kapattı
+        b, e = self.forward([c0 + 0.0001] * 6, after_entry=human)
+        self.assertEqual([x["kind"] for x in e.state["results"]], ["elle"])
+        self.assertEqual(sum("MÜDAHALE" in x and "elle kapatıldı" in x for x in self.logs), 1)
+
+    def test_manual_stop_move_is_detected_once_and_trailing_is_not(self):
+        c0 = self.df.close.iloc[-1]
+
+        def human(b, e):
+            b.positions()[0].sl -= 0.0020                                # stop 20 pip uzaklaştırıldı
+        b, e = self.forward([c0 + 0.0003 * k for k in range(1, 14)], after_entry=human)
+        hits = [x for x in self.logs if "MÜDAHALE" in x]
+        self.assertEqual(len(hits), 1)
+        self.assertIn("uzaklaştırıldı", hits[0])
+        self.assertTrue(any("STOP" in x for x in self.logs))            # botun kendi stop taşıması müdahale sayılmadı
+
+    def test_risk_ladder_levels_follow_live_evidence(self):
+        e = Engine(at_end(self.df), cfg(risk_ladder=True), log=self.logs.append)
+        rng = np.random.default_rng(0)
+
+        def fill(n, mean):
+            e.state["results"] = [{"t": "2024-01-01T00:00:00", "sym": "EURUSD", "r": float(x), "pnl": 0.0, "kind": "stop"}
+                                  for x in rng.normal(mean, 1.0, n)]
+        fill(50, 0.5)
+        self.assertEqual(e.ladder_factor(), 0.5)                         # kanıt yok: yarım risk
+        fill(150, 0.15)
+        self.assertEqual(e.ladder_factor(), 1.0)
+        fill(400, 0.25)
+        self.assertEqual(e.ladder_factor(), 2.0)
+        e.state["results"][-100:] = [dict(x, r=-0.5) for x in e.state["results"][-100:]]
+        self.assertEqual(e.ladder_factor(), 0.5)                         # son dönem kötü: geri iner
+        fill(400, -0.05)
+        self.assertEqual(e.ladder_factor(), 0.5)
+        self.assertEqual(Engine(at_end(self.df), cfg(risk_ladder=False)).ladder_factor(), 1.0)
+
+    def test_ladder_sizes_positions_and_never_exceeds_two_percent(self):
+        for ladder, tiers, expect in ((True, None, 0.0025), (False, None, 0.005)):
+            b = at_end(self.df)
+            conf = cfg(risk_ladder=ladder) if tiers is None else cfg(risk_ladder=ladder, risk_tiers=tiers)
+            Engine(b, conf, log=lambda *_: None).step()
+            p = b.positions()[0]
+            risk = (p.entry - p.sl) * p.lots * 100_000 / 10_000
+            self.assertLessEqual(risk, expect * 1.2 + 1e-9)
+            self.assertGreater(risk, expect * 0.8)
+        b = at_end(self.df)
+        e = Engine(b, cfg(risk_ladder=True, risk_tiers={1: 0.02, 2: 0.02, 3: 0.02}, max_portfolio_risk=0.1), log=lambda *_: None)
+        e.state["results"] = [{"t": "2024-01-01T00:00:00", "sym": "EURUSD", "r": 0.5 + 0.1 * (i % 3), "pnl": 0.0, "kind": "stop"}
+                              for i in range(400)]
+        self.assertEqual(e.ladder_factor(), 2.0)
+        e.step()
+        p = b.positions()[0]
+        self.assertLessEqual((p.entry - p.sl) * p.lots * 100_000 / 10_000, 0.02 + 1e-9)   # 2% x 2 değil, en çok %2
+
+    def test_ladder_change_is_journaled(self):
+        c0 = self.df.close.iloc[-1]
+        conf = cfg(risk_ladder=True)
+
+        def prefill(b, e):
+            e.state["results"] = [{"t": "2024-01-01T00:00:00", "sym": "EURUSD", "r": 0.3 + 0.2 * (i % 2), "pnl": 0.0,
+                                   "kind": "stop"} for i in range(99)]
+        b, e = self.forward([c0 - 0.0003, c0 - 0.0008, c0 - 0.0015, c0 - 0.0015], conf=conf, after_entry=prefill)
+        self.assertEqual(len(e.state["results"]), 100)
+        self.assertEqual(e.state["ladder"], 1.0)
+        self.assertEqual(sum("KADEME" in x for x in self.logs), 1)
+
+    def test_live_path_records_results_through_mt5_adapter(self):
+        from mt5_sim import SimMT5
+        live_tests = LivePathAgainstSimulatedTerminal()
+        make, _ = live_tests.brokers()
+        paper_b = make()
+        sim = SimMT5(paper_b)
+        conf = live_tests.conf(server_time={"tz": "America/New_York", "plus_hours": 7})
+        broker = MT5Broker(conf, mt5=sim, sleep=lambda x: None, clock=paper_b.now)
+        logs = []
+        e = Engine(broker, conf, log=logs.append)
+        manual_done = []
+        while True:
+            e.step()
+            if not manual_done and paper_b.positions():
+                manual_done.append(paper_b.positions()[0].ticket)
+                paper_b.close(paper_b.positions()[0])                   # bir pozisyonu kullanıcı kapatıyor
+            if not paper_b.advance():
+                break
+        e.step()
+        closed = {t["ticket"]: t for t in paper_b.closed}
+        res = e.state["results"]
+        self.assertEqual(len(res), len(closed))
+        kinds = [x["kind"] for x in res]
+        self.assertEqual(kinds.count("elle"), 1)
+        self.assertEqual(kinds.count("stop"), sum(1 for t in closed.values() if t["reason"] == "stop"))
+        self.assertGreater(kinds.count("bot"), 0)
+        self.assertAlmostEqual(sum(x["pnl"] for x in res), sum(t["pnl"] for t in closed.values()), places=1)
+        self.assertFalse([x for x in logs if "HATA" in x])
+
+    def test_report_summarises_results_and_interventions(self):
+        from fitil import report
+        with tempfile.TemporaryDirectory() as d:
+            res = [{"t": f"2024-03-{1 + i // 5:02d}T10:00:00", "sym": "EURUSD", "r": r, "pnl": r * 50, "kind": k}
+                   for i, (r, k) in enumerate([(1.5, "bot"), (-1.0, "stop"), (0.4, "elle"), (-1.0, "stop"), (2.0, "bot")] * 6)]
+            (Path(d) / "fitil_state.json").write_text(json.dumps({"results": res, "ladder": 0.5, "peak_equity": 10250.0, "adj": 1.0}),
+                                                      encoding="utf-8")
+            with (Path(d) / "fitil_journal.csv").open("w", encoding="utf-8-sig", newline="") as f:
+                f.write("time_utc,event,symbol,detail\n2024-03-01T10:00:00,MÜDAHALE,EURUSD,{}\n2024-03-02T10:00:00,ÇEKİM,,{}\n")
+            state, journal = report.load(Path(d))
+            text = report.build(state, journal, expected_r=0.14)
+            self.assertIn("Kapanmış işlem: 30", text)
+            self.assertIn("+0.380R", text)
+            self.assertIn("Risk merdiveni: 0.5x", text)
+            self.assertIn("elle kapatma: 6", text)
+            self.assertIn("Elle kapatılan işlemlerin ortalaması: +0.40R", text)
+            self.assertIn("Çekim önerileri: 1", text)
+            empty = report.build({"results": []}, [], None)
+            self.assertIn("Henüz kapanmış işlem yok", empty)
+
+    def test_coin_baseline_measures_direction_value(self):
+        rng = np.random.default_rng(5)
+        idx = pd.date_range("2024-01-01", periods=96 * 25, freq="15min")
+        idx = idx[idx.weekday < 5]
+        c = 1.10 * np.exp(np.cumsum(rng.standard_t(4, len(idx)) * 0.0004))
+        o = np.concatenate([[1.10], c[:-1]])
+        w = np.abs(rng.normal(0, 0.0003, (2, len(idx))))
+        df = pd.DataFrame({"open": o, "high": np.maximum(o, c) + w[0], "low": np.minimum(o, c) - w[1], "close": c}, index=idx)
+        out = bt.coin_baseline({"EURUSD": df}, cfg(), seeds=3)
+        self.assertGreater(out["strateji"]["islem"], 5)
+        self.assertGreater(out["yazi_tura"]["islem"], 5)
+        self.assertAlmostEqual(out["fark_R"], out["strateji"]["ort_R"] - out["yazi_tura"]["ort_R"])
+        _, _, eng = bt.run({"EURUSD": df}, cfg(risk_ladder=True))
+        self.assertFalse(eng.cfg.risk_ladder)                           # backtest sabit riskle ölçer
+
+
 class Plan(unittest.TestCase):
     def test_expectation_drives_outcome_and_brake_limits_damage(self):
         from fitil.plan import required_equity, simulate
