@@ -1811,6 +1811,87 @@ class DataExport(unittest.TestCase):
             self.assertEqual(data["EURUSD"].index[-1], idx[-2])             # sabit UTC+2 sunucu saati geri çevrildi
 
 
+def fx_week_schedule(start="2023-08-01", end="2024-06-01", minutes=15, seed=2):
+    """Gerçek döviz takvimi: pazar 17:00 New York açılış, cuma 17:00 New York kapanış (UTC indeksli)."""
+    from zoneinfo import ZoneInfo
+    ny = ZoneInfo("America/New_York")
+    idx = pd.date_range(start, end, freq=f"{minutes}min", tz="UTC")
+    local = idx.tz_convert(ny)
+    wd, hr = local.weekday, local.hour
+    open_ = ~((wd == 5) | ((wd == 4) & (hr >= 17)) | ((wd == 6) & (hr < 17)))
+    idx = idx[open_].tz_localize(None)
+    rng = np.random.default_rng(seed)
+    c = 1.10 * np.exp(np.cumsum(rng.normal(0, 0.0004, len(idx))))
+    o = np.concatenate([[1.10], c[:-1]])
+    return pd.DataFrame({"open": o, "high": np.maximum(o, c) + 0.0002, "low": np.minimum(o, c) - 0.0002, "close": c}, index=idx)
+
+
+class ServerClockDetection(unittest.TestCase):
+    """Sunucu saati, cuma kapanışının sunucu saatindeki yerinden çıkarılır (piyasa kapalıyken de)."""
+
+    def server_index(self, df, zone, plus):
+        from mt5_sim import SimMT5
+        paper_b = PaperBroker({"EURUSD": df}, {"EURUSD": SPEC}, {"EURUSD": 1e5}, {"EURUSD": "quote"}, {"EURUSD": 0.0001},
+                              start=df.index[-1])
+        sim = SimMT5(paper_b, zone=zone, plus_hours=plus)
+        return pd.to_datetime([sim.srv(t.to_pydatetime()) for t in df.index], unit="s")
+
+    def test_detects_new_york_anchored_and_fixed_offset_servers(self):
+        from fitil.servertime import detect_server_clock
+        df = fx_week_schedule()
+        self.assertEqual(detect_server_clock(self.server_index(df, "America/New_York", 7), 15),
+                         {"tz": "America/New_York", "plus_hours": 7})
+        self.assertEqual(detect_server_clock(self.server_index(df, "Etc/GMT-2", 0), 15), {"offset_hours": 2})
+        self.assertEqual(detect_server_clock(self.server_index(df, "Etc/GMT-3", 0), 15), {"offset_hours": 3})
+        self.assertEqual(detect_server_clock(self.server_index(df, "UTC", 0), 15), {"offset_hours": 0})
+        short = fx_week_schedule("2024-01-08", "2024-02-20")              # yalnızca kış: ayırt edilemez
+        self.assertIsNone(detect_server_clock(self.server_index(short, "America/New_York", 7), 15))
+
+    def test_export_works_with_market_closed_and_converts_all_seasons(self):
+        import contextlib
+        import io
+        import zipfile
+        from mt5_sim import SimMT5
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bot" / "tools"))
+        import export_mt5_history as ex
+        df = fx_week_schedule()
+        paper_b = PaperBroker({"EURUSD": df}, {"EURUSD": SPEC}, {"EURUSD": 1e5}, {"EURUSD": "quote"}, {"EURUSD": 0.0001},
+                              start=df.index[-1])
+        sim = SimMT5(paper_b, zone="America/New_York", plus_hours=7)
+        sim.tick_age = 36 * 3600.0                                    # pazar: son fiyat cuma kapanışından, akmıyor
+        conf = Config(symbols={"EURUSD": {"usd_beta": -1}})          # sunucu saati ayarı YOK
+        conf.validate()
+        with tempfile.TemporaryDirectory() as d:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                (zpath,) = ex.export(conf, Path(d), 15, mt5=sim)
+            text = out.getvalue()
+            self.assertIn("EURUSD geçmişinden çıkarıldı: New York + 7 saat", text)
+            self.assertIn('"server_time": {"tz": "America/New_York", "plus_hours": 7', text)
+            with zipfile.ZipFile(zpath) as z:
+                self.assertEqual(json.loads(z.read("ozet.json"))["sunucu_saati"], {"tz": "America/New_York", "plus_hours": 7})
+            data, _ = bt.load_data(zpath, ["EURUSD"])
+            self.assertEqual(list(data["EURUSD"].index), list(df.index[:-1]))   # kış ve yaz dönemleri doğru UTC
+
+    def test_export_without_detectable_clock_and_closed_market_gives_clear_error(self):
+        from mt5_sim import SimMT5
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bot" / "tools"))
+        import export_mt5_history as ex
+        df = fx_week_schedule("2024-01-08", "2024-02-20")
+        paper_b = PaperBroker({"EURUSD": df}, {"EURUSD": SPEC}, {"EURUSD": 1e5}, {"EURUSD": "quote"}, {"EURUSD": 0.0001},
+                              start=df.index[-1])
+        sim = SimMT5(paper_b)
+        sim.tick_age = 36 * 3600.0
+        conf = Config(symbols={"EURUSD": {"usd_beta": -1}})
+        conf.validate()
+        import contextlib
+        import io
+        with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(RuntimeError) as ctx:
+                ex.export(conf, Path(d), 15, mt5=sim)
+        self.assertIn("server_time", str(ctx.exception))
+
+
 class Plan(unittest.TestCase):
     def test_expectation_drives_outcome_and_brake_limits_damage(self):
         from fitil.plan import required_equity, simulate

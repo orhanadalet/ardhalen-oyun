@@ -31,6 +31,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fitil.config import Config            # noqa: E402
+from fitil.servertime import describe, detect_server_clock   # noqa: E402
 
 CHUNK = 50_000
 
@@ -51,10 +52,43 @@ def read_all(mt5, symbol: str, timeframe: int, max_bars: int) -> np.ndarray:
     return np.concatenate(parts[::-1])
 
 
+def resolve_server_clock(cfg: Config, mt5, minutes: int, max_bars: int) -> tuple[Config, str]:
+    """Config'te sunucu saati yoksa fiyat geçmişinden çıkarır (piyasa kapalıyken de çalışır)."""
+    from dataclasses import replace
+    if cfg.server_time is not None or cfg.server_utc_offset_hours is not None:
+        return cfg, "config'ten"
+    if not mt5.initialize():
+        raise RuntimeError(f"MT5 başlatılamadı: {mt5.last_error()}")
+    ref = (["EURUSD"] if "EURUSD" in cfg.symbols else []) + list(cfg.symbols)   # döviz kapanışı en net referans
+    tf = mt5.TIMEFRAME_H1 if minutes == 60 else getattr(mt5, f"TIMEFRAME_M{minutes}")
+    for sym in dict.fromkeys(ref):
+        if mt5.symbol_info(sym) is None:
+            continue
+        mt5.symbol_select(sym, True)
+        rates = read_all(mt5, sym, tf, max_bars)
+        if len(rates) == 0:
+            continue
+        clock = detect_server_clock(pd.to_datetime(rates["time"], unit="s"), minutes)
+        if clock is not None:
+            new = replace(cfg, server_time={"tz": clock["tz"], "plus_hours": clock["plus_hours"]}) if "tz" in clock \
+                else replace(cfg, server_utc_offset_hours=float(clock["offset_hours"]))
+            return new, f"{sym} geçmişinden çıkarıldı: {describe(clock)}"
+    return cfg, "geçmişten çıkarılamadı, canlı fiyattan kestirilecek"
+
+
 def export(cfg: Config, out_dir: Path, minutes: int = 15, max_bars: int = 2_000_000, mt5=None, broker=None,
            years: float = 0.0, per_symbol: bool = False) -> list[Path]:
     from fitil.mt5_broker import MT5Broker
-    broker = broker or MT5Broker(cfg, allow_real=True, mt5=mt5)        # yalnızca okuma: emir gönderilmez
+    if broker is None:
+        if mt5 is None:
+            import MetaTrader5 as mt5                                  # noqa: N813  (yalnızca Windows)
+        cfg, how = resolve_server_clock(cfg, mt5, minutes, max_bars)
+        print(f"Sunucu saati: {how}")
+        if cfg.server_time is not None:
+            print(f'  Bot için config.json\'a ekleyin: "server_time": {json.dumps(cfg.server_time)}')
+        elif cfg.server_utc_offset_hours is not None:
+            print(f'  Bot için config.json\'a ekleyin: "server_utc_offset_hours": {cfg.server_utc_offset_hours:g}')
+        broker = MT5Broker(cfg, allow_real=True, mt5=mt5)              # yalnızca okuma: emir gönderilmez
     mt5 = broker.mt5
     tf = mt5.TIMEFRAME_H1 if minutes == 60 else getattr(mt5, f"TIMEFRAME_M{minutes}")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -71,7 +105,9 @@ def export(cfg: Config, out_dir: Path, minutes: int = 15, max_bars: int = 2_000_
 
 def _write_zip(broker, mt5, tf, zpath: Path, symbols: list[str], stamp: str, minutes: int, max_bars: int,
                years: float) -> None:
-    summary = {"olusturma_utc": stamp, "zaman_dilimi_dk": minutes, "semboller": {}}
+    clock = broker.cfg.server_time or ({"offset_hours": broker.cfg.server_utc_offset_hours}
+                                       if broker.cfg.server_utc_offset_hours is not None else {"otomatik": True})
+    summary = {"olusturma_utc": stamp, "zaman_dilimi_dk": minutes, "sunucu_saati": clock, "semboller": {}}
     with zipfile.ZipFile(zpath, "w", compression=zipfile.ZIP_DEFLATED) as z:
         for sym in symbols:
             info = mt5.symbol_info(sym)

@@ -203,8 +203,10 @@ spread'i genişletir; hesap koşullarınızı kontrol edin.
    `claude/forex-commodity-trading-setup-czzu6o` > `trading/veri` > "Add file" > "Upload files". Tarayıcıdan
    dosya başına sınır 25 MB'tır; daha büyükse `--years 5` gibi bir sınırla yeniden dışa aktarın.
 
-Betik emir göndermez ve hesabı değiştirmez. Zamanlar UTC'ye çevrilir; piyasa kapalıyken çalıştıracaksanız
-config'e `server_time` yazın (aşağıda "Sunucu saati"). Zip içinde hesap bilgisi yoktur.
+Betik emir göndermez ve hesabı değiştirmez. Zip içinde hesap bilgisi yoktur. Zamanlar UTC'ye çevrilir: config'te
+sunucu saati yazılı değilse betik onu fiyat geçmişinden çıkarır (döviz piyasası cuma 17:00 New York'ta kapanır;
+kapanışın sunucu saatinde nereye düştüğü sunucunun saat düzenini gösterir). Bu yüzden hafta sonu da çalışır.
+Bulduğu ayarı ekrana yazar; o satırı botun `config.json` dosyasına da ekleyin.
 
 ## Geçmiş veride sınama
 
