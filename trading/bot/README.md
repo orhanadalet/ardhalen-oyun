@@ -166,7 +166,7 @@ Swap olmadığında da kazananı gece taşımak gün sonu kapanışından kötü
 Kendi hesabınızın koşullarıyla backtest:
 
 ```
-python -m fitil.backtest --config config.json --data ..\data --commission 0 --no-swap --spread 0.00012
+python -m fitil.backtest --config config.json --data ..\veri --commission 0 --no-swap --spread 0.00012
 ```
 
 `--spread` tüm semboller için ortak değerdir; sembol başına farklı spread için config'te sembolün altına
@@ -208,7 +208,7 @@ config'e `server_time` yazın (aşağıda "Sunucu saati"). Zip içinde hesap bil
 Canlıdaki aynı strateji ve motor kodu, simüle brokerla çalışır:
 
 ```
-python -m fitil.backtest --config config.json --data ..\data --tz-shift 2 --trades-out islemler.csv
+python -m fitil.backtest --config config.json --data ..\veri --commission 0 --no-swap --trades-out islemler.csv
 ```
 
 `--data` klasöründe config'teki sembol adıyla `<SEMBOL>.csv` dosyaları olmalı. MT5 çubuk dışa
@@ -223,7 +223,7 @@ Zaman dilimi `"strategy": {"bar_minutes": 15}` ile seçilir (5, 15, 30 ya da 60)
 Parametreyi geçmişte seçip görülmemiş dönemde sınamak (walk-forward) için:
 
 ```
-python -m fitil.backtest --config config.json --data ..\data --wf --train-days 120 --test-days 30
+python -m fitil.backtest --config config.json --data ..\veri --commission 0 --no-swap --wf --train-days 120 --test-days 30
 ```
 
 Yalnızca örnek dışı (test) sonuçlar kanıt sayılır. Ortalama R, standart hatasının iki katından büyük
